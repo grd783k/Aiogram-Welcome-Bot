@@ -50,6 +50,13 @@ def init_db() -> None:
                 sent_at    TEXT    NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS visits (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                visited_at TEXT    NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -90,6 +97,29 @@ def user_count() -> int:
     """Return the total number of registered users."""
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
+# ── Visits ───────────────────────────────────────────────────────────────────
+
+def log_visit(user_id: int) -> None:
+    """Record every /start event (including repeat visits by the same user)."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO visits (user_id, visited_at) VALUES (?, ?)",
+            (user_id, now),
+        )
+        conn.commit()
+
+
+def visits_today() -> int:
+    """Return the number of /start events since 00:00:00 UTC today."""
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT COUNT(*) FROM visits WHERE visited_at >= ?",
+            (today,),
+        ).fetchone()[0]
 
 
 # ── Daily messages ────────────────────────────────────────────────────────────

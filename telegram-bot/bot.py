@@ -25,9 +25,11 @@ from database import (
     get_all_daily_messages,
     get_all_users,
     init_db,
+    log_visit,
     register_user,
     save_daily_message,
     user_count,
+    visits_today,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -206,6 +208,7 @@ async def start_handler(message: types.Message) -> None:
             first_name=user.first_name or "",
             username=user.username,
         )
+        log_visit(user.id)   # always recorded, even for returning users
         logger.info("%s user: id=%s name=%s", "New" if is_new else "Returning", user.id, user.first_name)
         await notify_admin(user, is_new)
 
@@ -248,8 +251,14 @@ async def stats_handler(message: types.Message) -> None:
     if not is_admin(message.from_user.id):
         await message.answer("⛔ Accès refusé.")
         return
-    count = user_count()
-    sent = await message.answer(f"👥 Utilisateurs enregistrés : *{count}*", parse_mode="Markdown")
+    total   = user_count()
+    today   = visits_today()
+    text = (
+        "📊 *Statistiques du bot*\n\n"
+        f"👥 Utilisateurs enregistrés : *{total}*\n"
+        f"📅 Visites aujourd'hui (00:00 → 23:59) : *{today}*"
+    )
+    sent = await message.answer(text, parse_mode="Markdown")
     schedule_deletion(sent)
 
 
