@@ -42,4 +42,9 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
     [nix]
     channel = "stable-25_05"
+
+[userenv]
+
+[userenv.shared]
+MINIAPP_URL = "https://0b280a30-161a-4a13-83ad-5e350bb266d9-00-3b1b4ioogawbn.riker.replit.dev/"
     

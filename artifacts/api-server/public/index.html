@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Guardiola Farm 66</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+    #splash {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 1;
+      transition: opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #splash.fade-out { opacity: 0; pointer-events: none; }
+
+    #splash::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 48%,
+        rgba(34, 197, 94, 0.06) 0%, transparent 100%);
+      pointer-events: none;
+    }
+
+    .s-logo-wrap { position: relative; margin-bottom: 56px; }
+
+    .s-logo-halo {
+      position: absolute;
+      inset: -28px;
+      border-radius: 50%;
+      background: radial-gradient(circle, rgba(34,197,94,0.20) 0%, transparent 68%);
+      animation: s-glow-pulse 2.4s ease-in-out infinite;
+    }
+
+    .s-logo-card {
+      position: relative;
+      width: 96px;
+      height: 96px;
+      border-radius: 24px;
+      background: linear-gradient(150deg, #141414 0%, #0c0c0c 100%);
+      border: 1.5px solid rgba(34,197,94,0.22);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        0 0 40px rgba(34,197,94,0.10),
+        0 0 12px rgba(34,197,94,0.06),
+        inset 0 1px 0 rgba(255,255,255,0.04);
+      opacity: 0;
+      animation: s-logo-in 0.55s 0.05s cubic-bezier(0.34,1.56,0.64,1) forwards;
+    }
+
+    /*
+      Pour utiliser votre propre logo :
+      1. Ajoutez votre fichier logo dans le dossier public/ (ex: logo.png)
+      2. Décommentez la balise <img> dans le HTML et commentez le bloc .s-logo-text
+    */
+    .s-logo-text { display: flex; flex-direction: column; align-items: center; }
+    .s-logo-letter {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 30px; font-weight: 800; color: #22c55e;
+      letter-spacing: -1px; line-height: 1;
+    }
+    .s-logo-sub {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 11px; font-weight: 700; color: rgba(34,197,94,0.55);
+      letter-spacing: 2.5px; margin-top: 3px;
+    }
+
+    .s-progress-section {
+      width: min(268px, 80vw);
+      display: flex; flex-direction: column; gap: 10px;
+    }
+
+    .s-top-row { display: flex; justify-content: space-between; align-items: center; }
+
+    .s-label {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 11px; color: rgba(255,255,255,0.18); letter-spacing: 0.4px;
+    }
+    .s-pct {
+      font-family: 'SF Mono', 'Fira Code', monospace;
+      font-size: 12px; font-weight: 600; color: #22c55e;
+      min-width: 34px; text-align: right;
+    }
+
+    .s-bar-track {
+      height: 3px; background: rgba(255,255,255,0.07);
+      border-radius: 999px; overflow: hidden;
+    }
+    .s-bar-fill {
+      height: 100%; width: 0%; border-radius: 999px;
+      background: linear-gradient(90deg, #15803d, #22c55e 50%, #86efac);
+      background-size: 200% 100%;
+      box-shadow: 0 0 12px rgba(34,197,94,0.65), 0 0 5px rgba(34,197,94,0.4);
+    }
+    .s-bar-fill.shimmer { animation: s-bar-shimmer 1.4s linear infinite; }
+
+    .s-msg {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 12px; color: rgba(255,255,255,0.32);
+      letter-spacing: 0.3px; text-align: center;
+      min-height: 18px; transition: color 0.25s ease, opacity 0.18s ease;
+    }
+    .s-msg.welcome { color: rgba(255,255,255,0.60); }
+
+    @keyframes s-logo-in {
+      0%   { opacity: 0; transform: scale(0.80); }
+      62%  { opacity: 1; transform: scale(1.07); }
+      100% { opacity: 1; transform: scale(1.00); }
+    }
+    @keyframes s-glow-pulse {
+      0%, 100% { opacity: 0.65; transform: scale(1.00); }
+      50%       { opacity: 1.00; transform: scale(1.14); }
+    }
+    @keyframes s-bar-shimmer {
+      0%   { background-position: 200% center; }
+      100% { background-position: -200% center; }
+    }
+  </style>
+</head>
+<body>
+  <div id="splash">
+    <div class="s-logo-wrap">
+      <div class="s-logo-halo"></div>
+      <div class="s-logo-card">
+        <!--
+          Option logo image : décommentez ces 2 lignes et commentez .s-logo-text
+          <img src="logo.png" style="width:64px;height:64px;object-fit:contain;"
+               onerror="this.style.display='none';document.querySelector('.s-logo-text').style.display='flex';" />
+        -->
+        <div class="s-logo-text">
+          <span class="s-logo-letter">G</span>
+          <span class="s-logo-sub">66</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="s-progress-section">
+      <div class="s-top-row">
+        <span class="s-label" id="s-label">Chargement</span>
+        <span class="s-pct"  id="s-pct">0%</span>
+      </div>
+      <div class="s-bar-track">
+        <div class="s-bar-fill" id="s-bar"></div>
+      </div>
+      <div class="s-msg" id="s-msg">Initialisation…</div>
+    </div>
+  </div>
+
+  <script>
+  (function () {
+    'use strict';
+
+    var LOGO_DELAY_MS   = 280;
+    var PROGRESS_MS     = 1600;
+    var HOLD_MS         = 550;
+    var FADE_MS         = 380;
+    // URL de la Mini App réelle — ouverte après le splash
+    var APP_URL         = 'https://www.guardiola66.com/login';
+
+    var MESSAGES = [
+      'Initialisation…',
+      'Connexion sécurisée…',
+      'Chargement du shop…',
+      'Vérification des données…',
+      'Finalisation…',
+    ];
+
+    // Prénom via Telegram WebApp
+    var firstName = 'vous';
+    try {
+      var tg = window.Telegram && window.Telegram.WebApp;
+      if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+        firstName = tg.initDataUnsafe.user.first_name || firstName;
+      }
+    } catch (_) {}
+
+    var splashEl = document.getElementById('splash');
+    var barEl    = document.getElementById('s-bar');
+    var pctEl    = document.getElementById('s-pct');
+    var msgEl    = document.getElementById('s-msg');
+    var labelEl  = document.getElementById('s-label');
+
+    function redirect() {
+      window.location.replace(APP_URL);
+    }
+
+    function endSplash() {
+      splashEl.classList.add('fade-out');
+      setTimeout(redirect, FADE_MS + 50);
+    }
+
+    function startProgress() {
+      barEl.classList.add('shimmer');
+      var startTime    = null;
+      var lastMsgIndex = -1;
+
+      function tick(now) {
+        if (!startTime) startTime = now;
+        var elapsed = now - startTime;
+        var pct = Math.min(100, Math.floor((elapsed / PROGRESS_MS) * 100));
+
+        barEl.style.width = pct + '%';
+        pctEl.textContent = pct + '%';
+
+        var msgIdx = Math.min(Math.floor(pct / 20), MESSAGES.length - 1);
+        if (msgIdx !== lastMsgIndex) {
+          lastMsgIndex = msgIdx;
+          msgEl.style.opacity = '0';
+          setTimeout(function () {
+            msgEl.textContent = MESSAGES[msgIdx];
+            msgEl.style.opacity = '1';
+          }, 100);
+        }
+
+        if (pct < 100) {
+          requestAnimationFrame(tick);
+        } else {
+          barEl.classList.remove('shimmer');
+          labelEl.textContent = 'Prêt ✓';
+
+          // Haptic feedback Telegram
+          try {
+            if (tg && tg.HapticFeedback) {
+              tg.HapticFeedback.notificationOccurred('success');
+            }
+          } catch (_) {}
+
+          // Message de bienvenue
+          setTimeout(function () {
+            msgEl.classList.add('welcome');
+            msgEl.style.opacity = '0';
+            setTimeout(function () {
+              msgEl.textContent = '👋 Bienvenue, ' + firstName;
+              msgEl.style.opacity = '1';
+            }, 120);
+            setTimeout(endSplash, HOLD_MS);
+          }, 80);
+        }
+      }
+
+      requestAnimationFrame(tick);
+    }
+
+    // Notifier Telegram que la Mini App est prête
+    try { if (tg) tg.ready(); } catch (_) {}
+
+    setTimeout(startProgress, LOGO_DELAY_MS);
+  })();
+  </script>
+</body>
+</html>

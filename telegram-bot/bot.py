@@ -160,7 +160,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [InlineKeyboardButton(
                 text="📲 Ouvrir le menu",
-                web_app=WebAppInfo(url="https://www.guardiola66.com/login"),
+                web_app=WebAppInfo(url=os.environ.get("MINIAPP_URL", "https://www.guardiola66.com/login")),
             )],
             [InlineKeyboardButton(
                 text="📞 Contact",
