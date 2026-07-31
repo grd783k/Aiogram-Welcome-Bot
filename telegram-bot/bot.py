@@ -26,11 +26,13 @@ from database import (
     get_all_broadcast_messages,
     get_all_daily_messages,
     get_all_users,
+    get_config,
     init_db,
     log_visit,
     register_user_atomic,
     save_broadcast_message,
     save_daily_message,
+    set_config,
     user_count,
     visits_today,
 )
@@ -272,6 +274,7 @@ async def start_handler(message: types.Message) -> None:
         )
         if sent.photo:
             _welcome_file_id = sent.photo[-1].file_id
+            set_config("welcome_file_id", _welcome_file_id)
             logger.info("/start SENT (uploaded + file_id cached)  api=%.0f ms",
                         (loop.time() - t2) * 1000)
         else:
@@ -436,8 +439,14 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def main() -> None:
+    global _welcome_file_id
     init_db()
     logger.info("Database initialised.")
+    _welcome_file_id = get_config("welcome_file_id")
+    if _welcome_file_id:
+        logger.info("Loaded welcome_file_id from DB (length=%d)", len(_welcome_file_id))
+    else:
+        logger.info("No welcome_file_id in DB — will upload on first /start")
     logger.info("Starting bot… (admin_id=%s)", ADMIN_ID)
 
     # Start daily schedulers as background tasks

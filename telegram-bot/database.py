@@ -67,6 +67,12 @@ def init_db() -> None:
                 sent_at    TEXT    NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS config (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -165,9 +171,13 @@ def clear_broadcast_messages() -> int:
         conn.commit()
         return cursor.rowcount
 
-
-# ── Daily messages ────────────────────────────────────────────────────────────
-
+def get_config(key: str) -> str | None:
+    """Return the value for *key* from the config table, or None if absent."""
+    with _connect() as conn:
+        row = conn.execute(
+            "SELECT value FROM config WHERE key = ?", (key,)
+        ).fetchone()
+        return row["value"] if row else None
 def save_daily_message(chat_id: int, message_id: int) -> None:
     """Record a daily shop message so it can be deleted at midnight."""
     now = datetime.now(timezone.utc).isoformat()
@@ -193,3 +203,13 @@ def clear_daily_messages() -> int:
         cursor = conn.execute("DELETE FROM daily_messages")
         conn.commit()
         return cursor.rowcount
+
+def set_config(key: str, value: str) -> None:
+    """Upsert *key* → *value* in the config table."""
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO config (key, value) VALUES (?, ?)"
+            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, value),
+        )
+        conn.commit()
