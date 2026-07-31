@@ -171,6 +171,10 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 text="🕘 horraire",
                 callback_data="horraire",
             )],
+            [InlineKeyboardButton(
+                text="📢 Canal",
+                url="https://t.me/+lhdKsCF5TW00NTg0",
+            )],
         ]
     )
 
