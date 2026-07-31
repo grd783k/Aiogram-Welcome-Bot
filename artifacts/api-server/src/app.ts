@@ -36,8 +36,9 @@ app.use(express.urlencoded({ extended: true }));
 app.use("/api", router);
 
 // Serve the Telegram Mini App static files (splash screen + app shell)
+// Mounted under /api because the Replit proxy forwards the full path without stripping the prefix.
 const publicDir = path.join(__dirname, "../public");
-app.use(express.static(publicDir));
+app.use("/api", express.static(publicDir));
 
 // SPA fallback: any unmatched route returns index.html (splash screen)
 app.use((_req, res) => {

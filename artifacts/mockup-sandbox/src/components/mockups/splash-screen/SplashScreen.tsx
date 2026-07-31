@@ -145,26 +145,11 @@ export function SplashScreen() {
             animation:    "logo-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both",
             boxShadow:    "0 0 40px rgba(34,197,94,0.10), 0 0 12px rgba(34,197,94,0.06), inset 0 1px 0 rgba(255,255,255,0.04)",
           }}>
-            {/*
-              ── Swap these two lines for your real logo ──
-              <img src="logo.png" style={{ width: 64, height: 64, objectFit: "contain" }} />
-            */}
-            <span style={{
-              fontFamily:  "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-              fontSize:    30,
-              fontWeight:  800,
-              color:       "#22c55e",
-              letterSpacing: -1,
-              lineHeight:  1,
-            }}>G</span>
-            <span style={{
-              fontFamily:  "system-ui, -apple-system, BlinkMacSystemFont, sans-serif",
-              fontSize:    11,
-              fontWeight:  700,
-              color:       "rgba(34,197,94,0.55)",
-              letterSpacing: 2.5,
-              marginTop:   3,
-            }}>66</span>
+            <img
+              src="/api/logo.svg"
+              alt="Guardiola Farm 66"
+              style={{ width: 64, height: 64, objectFit: "contain" }}
+            />
           </div>
         </div>
 
