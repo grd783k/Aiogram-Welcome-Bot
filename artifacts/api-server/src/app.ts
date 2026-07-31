@@ -35,7 +35,16 @@ app.use(express.urlencoded({ extended: true }));
 
 // Serve the Telegram Mini App static files FIRST so /api/ → index.html
 // takes priority over the API router catch-all.
+// index.html is served with no-cache so Telegram never serves a stale version.
 const publicDir = path.join(__dirname, "../public");
+app.use("/api", (req, res, next) => {
+  if (req.path === "/" || req.path === "/index.html") {
+    res.setHeader("Cache-Control", "no-store, no-cache, must-revalidate");
+    res.setHeader("Pragma", "no-cache");
+    res.setHeader("Expires", "0");
+  }
+  next();
+});
 app.use("/api", express.static(publicDir));
 
 // API routes (/api/healthz, etc.)
