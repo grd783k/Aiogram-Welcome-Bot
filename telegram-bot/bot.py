@@ -17,6 +17,7 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
@@ -470,6 +471,20 @@ async def main() -> None:
     else:
         logger.info("No welcome_file_id in DB — will upload on first /start")
     logger.info("Starting bot… (admin_id=%s)", ADMIN_ID)
+
+    # ── Sync the Menu button (blue Telegram button) to the same URL as the
+    #    inline "Ouvrir le menu" button so both entry points hit the splash screen.
+    miniapp_url = os.environ.get("MINIAPP_URL", "https://www.guardiola66.com/login")
+    try:
+        await bot.set_chat_menu_button(
+            menu_button=MenuButtonWebApp(
+                text="Menu",
+                web_app=WebAppInfo(url=miniapp_url),
+            )
+        )
+        logger.info("Menu button set to: %s", miniapp_url)
+    except Exception:
+        logger.warning("Could not set menu button — will retry on next restart", exc_info=True)
 
     # Start daily schedulers as background tasks
     asyncio.create_task(scheduler_open())
