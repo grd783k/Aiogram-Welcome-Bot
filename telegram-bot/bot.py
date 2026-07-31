@@ -213,7 +213,7 @@ async def start_handler(message: types.Message) -> None:
         )
         log_visit(user.id)   # always recorded, even for returning users
         logger.info("%s user: id=%s name=%s", "New" if is_new else "Returning", user.id, user.first_name)
-        await notify_admin(user, is_new)
+        asyncio.create_task(notify_admin(user, is_new))  # non-blocking — don't delay the reply
 
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
@@ -388,7 +388,7 @@ async def main() -> None:
     asyncio.create_task(scheduler_open())
     asyncio.create_task(scheduler_close())
 
-    await dp.start_polling(bot)
+    await dp.start_polling(bot, skip_updates=True)
 
 
 if __name__ == "__main__":
