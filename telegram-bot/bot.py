@@ -64,6 +64,45 @@ def schedule_deletion(message: Message) -> None:
 def is_admin(user_id: int) -> bool:
     return ADMIN_ID is not None and user_id == ADMIN_ID
 
+# ── Admin notification ────────────────────────────────────────────────────────
+
+async def notify_admin(user: types.User, is_new: bool) -> None:
+    """Send a private Telegram notification to ADMIN_ID about a /start event."""
+    from datetime import datetime, timezone
+
+    username_display = f"@{user.username}" if user.username else "—"
+    now = datetime.now(timezone.utc).strftime("%d/%m/%Y %H:%M UTC")
+    total = user_count()
+
+    if is_new:
+        text = (
+            "🆕 *Nouvel utilisateur*\n"
+            f"👤 Prénom : {user.first_name or '—'}\n"
+            f"📛 Username : {username_display}\n"
+            f"🆔 User ID : `{user.id}`\n"
+            f"📅 Date : {now}\n"
+            f"📊 Total inscrits : *{total}*"
+        )
+    else:
+        text = (
+            "🔄 *Utilisateur existant — a relancé le bot*\n"
+            f"👤 Prénom : {user.first_name or '—'}\n"
+            f"📛 Username : {username_display}\n"
+            f"🆔 User ID : `{user.id}`\n"
+            f"📅 Date : {now}\n"
+            f"📊 Total inscrits : *{total}*"
+        )
+
+    try:
+        await bot.send_message(
+            chat_id=ADMIN_ID,
+            text=text,
+            parse_mode="Markdown",
+        )
+    except Exception as e:
+        logger.warning("Could not notify admin: %s", e)
+
+
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def start_keyboard() -> InlineKeyboardMarkup:
@@ -104,8 +143,15 @@ async def start_handler(message: types.Message) -> None:
             first_name=user.first_name or "",
             username=user.username,
         )
-        if is_new:
-            logger.info("New user registered: id=%s name=%s", user.id, user.first_name)
+        logger.info(
+            "%s user: id=%s name=%s",
+            "New" if is_new else "Returning",
+            user.id,
+            user.first_name,
+        )
+        # Notify admin
+        if ADMIN_ID:
+            await notify_admin(user, is_new)
 
     name = (user.first_name if user and user.first_name else None) or \
            (user.username if user and user.username else None)
