@@ -315,6 +315,21 @@ async def start_handler(message: types.Message) -> None:
         asyncio.create_task(_notify_admin_reliable(user, is_new, total))
 
 
+@dp.message(Command("channel"))
+async def channel_handler(message: types.Message) -> None:
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(
+            text="📢 Rejoindre le canal",
+            url="https://t.me/+lhdKsCF5TW00NTg0",
+        )
+    ]])
+    sent = await message.reply(
+        "Clique sur le bouton ci-dessous :",
+        reply_markup=keyboard,
+    )
+    schedule_deletion(sent)
+
+
 @dp.message(Command("contact"))
 async def contact_handler(message: types.Message) -> None:
     keyboard = InlineKeyboardMarkup(inline_keyboard=[[
