@@ -1,5 +1,5 @@
 """
-SQLite user registry for the Guardiola bot.
+SQLite registry for the Guardiola bot.
 
 Tables
 ------
@@ -9,6 +9,12 @@ users
     first_name  TEXT                  — Telegram first name (may be empty)
     username    TEXT                  — Telegram @username (nullable)
     joined_at   TEXT NOT NULL         — ISO-8601 UTC timestamp of first /start
+
+daily_messages
+    id          INTEGER PRIMARY KEY AUTOINCREMENT
+    chat_id     INTEGER NOT NULL      — Telegram chat ID the message was sent to
+    message_id  INTEGER NOT NULL      — Telegram message_id (needed to delete it)
+    sent_at     TEXT    NOT NULL      — ISO-8601 UTC timestamp of send
 """
 
 import sqlite3
@@ -36,8 +42,18 @@ def init_db() -> None:
                 joined_at  TEXT    NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS daily_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                sent_at    TEXT    NOT NULL
+            )
+        """)
         conn.commit()
 
+
+# ── Users ─────────────────────────────────────────────────────────────────────
 
 def register_user(
     user_id: int,
@@ -47,7 +63,7 @@ def register_user(
 ) -> bool:
     """
     Insert the user if not already registered.
-    Returns True if the user was newly inserted, False if they already existed.
+    Returns True if newly inserted, False if they already existed.
     """
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
@@ -59,7 +75,7 @@ def register_user(
             (user_id, chat_id, first_name or "", username, now),
         )
         conn.commit()
-        return cursor.rowcount > 0  # True → new user
+        return cursor.rowcount > 0
 
 
 def get_all_users() -> list[sqlite3.Row]:
@@ -74,3 +90,32 @@ def user_count() -> int:
     """Return the total number of registered users."""
     with _connect() as conn:
         return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+
+
+# ── Daily messages ────────────────────────────────────────────────────────────
+
+def save_daily_message(chat_id: int, message_id: int) -> None:
+    """Record a daily shop message so it can be deleted at midnight."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO daily_messages (chat_id, message_id, sent_at) VALUES (?, ?, ?)",
+            (chat_id, message_id, now),
+        )
+        conn.commit()
+
+
+def get_all_daily_messages() -> list[sqlite3.Row]:
+    """Return all saved daily message records."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT chat_id, message_id FROM daily_messages"
+        ).fetchall()
+
+
+def clear_daily_messages() -> int:
+    """Delete all daily message records. Returns the number of rows deleted."""
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM daily_messages")
+        conn.commit()
+        return cursor.rowcount
