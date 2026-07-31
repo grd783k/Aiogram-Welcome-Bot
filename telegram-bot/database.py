@@ -1,78 +1,94 @@
 """
-SQLite registry for the Guardiola bot.
+PostgreSQL registry for the Guardiola bot.
 
 Tables
 ------
 users
-    user_id     INTEGER PRIMARY KEY   — Telegram user ID (unique, no duplicates)
-    chat_id     INTEGER NOT NULL      — Telegram chat ID (same as user_id for private chats)
+    user_id     BIGINT PRIMARY KEY    — Telegram user ID (unique, no duplicates)
+    chat_id     BIGINT NOT NULL       — Telegram chat ID (same as user_id for private chats)
     first_name  TEXT                  — Telegram first name (may be empty)
     username    TEXT                  — Telegram @username (nullable)
     joined_at   TEXT NOT NULL         — ISO-8601 UTC timestamp of first /start
 
 daily_messages
-    id          INTEGER PRIMARY KEY AUTOINCREMENT
-    chat_id     INTEGER NOT NULL      — Telegram chat ID the message was sent to
-    message_id  INTEGER NOT NULL      — Telegram message_id (needed to delete it)
-    sent_at     TEXT    NOT NULL      — ISO-8601 UTC timestamp of send
+    id          SERIAL PRIMARY KEY
+    chat_id     BIGINT NOT NULL       — Telegram chat ID the message was sent to
+    message_id  BIGINT NOT NULL       — Telegram message_id (needed to delete it)
+    sent_at     TEXT   NOT NULL       — ISO-8601 UTC timestamp of send
+
+visits
+    id          SERIAL PRIMARY KEY
+    user_id     BIGINT NOT NULL
+    visited_at  TEXT   NOT NULL       — ISO-8601 UTC timestamp
+
+broadcast_messages
+    id          SERIAL PRIMARY KEY
+    chat_id     BIGINT NOT NULL
+    message_id  BIGINT NOT NULL
+    sent_at     TEXT   NOT NULL
+
+config
+    key         TEXT PRIMARY KEY
+    value       TEXT NOT NULL
 """
 
-import sqlite3
+import os
 from datetime import datetime, timezone
-from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "users.db"
+import psycopg2
+import psycopg2.extras
+
+DATABASE_URL = os.environ["DATABASE_URL"]
 
 
-def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")   # better concurrent read/write
-    conn.execute("PRAGMA synchronous=NORMAL") # safe + faster than FULL
+def _connect() -> psycopg2.extensions.connection:
+    conn = psycopg2.connect(DATABASE_URL, cursor_factory=psycopg2.extras.RealDictCursor)
+    conn.autocommit = False
     return conn
 
 
 def init_db() -> None:
     """Create tables if they don't exist yet."""
     with _connect() as conn:
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS users (
-                user_id    INTEGER PRIMARY KEY,
-                chat_id    INTEGER NOT NULL,
-                first_name TEXT    NOT NULL DEFAULT '',
-                username   TEXT,
-                joined_at  TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS daily_messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id    INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                sent_at    TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS visits (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                user_id    INTEGER NOT NULL,
-                visited_at TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS broadcast_messages (
-                id         INTEGER PRIMARY KEY AUTOINCREMENT,
-                chat_id    INTEGER NOT NULL,
-                message_id INTEGER NOT NULL,
-                sent_at    TEXT    NOT NULL
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS config (
-                key   TEXT PRIMARY KEY,
-                value TEXT NOT NULL
-            )
-        """)
+        with conn.cursor() as cur:
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    user_id    BIGINT PRIMARY KEY,
+                    chat_id    BIGINT NOT NULL,
+                    first_name TEXT   NOT NULL DEFAULT '',
+                    username   TEXT,
+                    joined_at  TEXT   NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS daily_messages (
+                    id         SERIAL PRIMARY KEY,
+                    chat_id    BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    sent_at    TEXT   NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS visits (
+                    id         SERIAL PRIMARY KEY,
+                    user_id    BIGINT NOT NULL,
+                    visited_at TEXT   NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS broadcast_messages (
+                    id         SERIAL PRIMARY KEY,
+                    chat_id    BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    sent_at    TEXT   NOT NULL
+                )
+            """)
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS config (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
         conn.commit()
 
 
@@ -94,30 +110,39 @@ def register_user_atomic(
     """
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
-        cursor = conn.execute(
-            "INSERT OR IGNORE INTO users "
-            "(user_id, chat_id, first_name, username, joined_at) "
-            "VALUES (?, ?, ?, ?, ?)",
-            (user_id, chat_id, first_name or "", username, now),
-        )
-        is_new = cursor.rowcount > 0
-        total  = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO users (user_id, chat_id, first_name, username, joined_at)
+                VALUES (%s, %s, %s, %s, %s)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                (user_id, chat_id, first_name or "", username, now),
+            )
+            is_new = cur.rowcount > 0
+            cur.execute("SELECT COUNT(*) AS cnt FROM users")
+            total = cur.fetchone()["cnt"]
         conn.commit()
         return is_new, total
 
 
-def get_all_users() -> list[sqlite3.Row]:
+def get_all_users() -> list[dict]:
     """Return all registered users (for broadcast use)."""
     with _connect() as conn:
-        return conn.execute(
-            "SELECT user_id, chat_id, first_name, username, joined_at FROM users ORDER BY joined_at"
-        ).fetchall()
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id, chat_id, first_name, username, joined_at "
+                "FROM users ORDER BY joined_at"
+            )
+            return cur.fetchall()
 
 
 def user_count() -> int:
     """Return the total number of registered users."""
     with _connect() as conn:
-        return conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS cnt FROM users")
+            return cur.fetchone()["cnt"]
 
 
 # ── Visits ───────────────────────────────────────────────────────────────────
@@ -126,10 +151,11 @@ def log_visit(user_id: int) -> None:
     """Record every /start event (including repeat visits by the same user)."""
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
-        conn.execute(
-            "INSERT INTO visits (user_id, visited_at) VALUES (?, ?)",
-            (user_id, now),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO visits (user_id, visited_at) VALUES (%s, %s)",
+                (user_id, now),
+            )
         conn.commit()
 
 
@@ -137,10 +163,12 @@ def visits_today() -> int:
     """Return the number of /start events since 00:00:00 UTC today."""
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     with _connect() as conn:
-        return conn.execute(
-            "SELECT COUNT(*) FROM visits WHERE visited_at >= ?",
-            (today,),
-        ).fetchone()[0]
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT COUNT(*) AS cnt FROM visits WHERE visited_at >= %s",
+                (today,),
+            )
+            return cur.fetchone()["cnt"]
 
 
 # ── Broadcast messages ────────────────────────────────────────────────────────
@@ -149,67 +177,86 @@ def save_broadcast_message(chat_id: int, message_id: int) -> None:
     """Record a broadcast message_id so it can be deleted on demand."""
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
-        conn.execute(
-            "INSERT INTO broadcast_messages (chat_id, message_id, sent_at) VALUES (?, ?, ?)",
-            (chat_id, message_id, now),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO broadcast_messages (chat_id, message_id, sent_at) "
+                "VALUES (%s, %s, %s)",
+                (chat_id, message_id, now),
+            )
         conn.commit()
 
 
-def get_all_broadcast_messages() -> list[sqlite3.Row]:
+def get_all_broadcast_messages() -> list[dict]:
     """Return all saved broadcast message records."""
     with _connect() as conn:
-        return conn.execute(
-            "SELECT chat_id, message_id FROM broadcast_messages"
-        ).fetchall()
+        with conn.cursor() as cur:
+            cur.execute("SELECT chat_id, message_id FROM broadcast_messages")
+            return cur.fetchall()
 
 
 def clear_broadcast_messages() -> int:
     """Delete all broadcast message records. Returns the number of rows deleted."""
     with _connect() as conn:
-        cursor = conn.execute("DELETE FROM broadcast_messages")
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM broadcast_messages")
+            count = cur.rowcount
         conn.commit()
-        return cursor.rowcount
+        return count
 
-def get_config(key: str) -> str | None:
-    """Return the value for *key* from the config table, or None if absent."""
-    with _connect() as conn:
-        row = conn.execute(
-            "SELECT value FROM config WHERE key = ?", (key,)
-        ).fetchone()
-        return row["value"] if row else None
+
+# ── Daily messages ────────────────────────────────────────────────────────────
+
 def save_daily_message(chat_id: int, message_id: int) -> None:
     """Record a daily shop message so it can be deleted at midnight."""
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
-        conn.execute(
-            "INSERT INTO daily_messages (chat_id, message_id, sent_at) VALUES (?, ?, ?)",
-            (chat_id, message_id, now),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO daily_messages (chat_id, message_id, sent_at) "
+                "VALUES (%s, %s, %s)",
+                (chat_id, message_id, now),
+            )
         conn.commit()
 
 
-def get_all_daily_messages() -> list[sqlite3.Row]:
+def get_all_daily_messages() -> list[dict]:
     """Return all saved daily message records."""
     with _connect() as conn:
-        return conn.execute(
-            "SELECT chat_id, message_id FROM daily_messages"
-        ).fetchall()
+        with conn.cursor() as cur:
+            cur.execute("SELECT chat_id, message_id FROM daily_messages")
+            return cur.fetchall()
 
 
 def clear_daily_messages() -> int:
     """Delete all daily message records. Returns the number of rows deleted."""
     with _connect() as conn:
-        cursor = conn.execute("DELETE FROM daily_messages")
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM daily_messages")
+            count = cur.rowcount
         conn.commit()
-        return cursor.rowcount
+        return count
+
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+def get_config(key: str) -> str | None:
+    """Return the value for *key* from the config table, or None if absent."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT value FROM config WHERE key = %s", (key,))
+            row = cur.fetchone()
+            return row["value"] if row else None
+
 
 def set_config(key: str, value: str) -> None:
     """Upsert *key* → *value* in the config table."""
     with _connect() as conn:
-        conn.execute(
-            "INSERT INTO config (key, value) VALUES (?, ?)"
-            " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            (key, value),
-        )
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO config (key, value) VALUES (%s, %s)
+                ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
+                """,
+                (key, value),
+            )
         conn.commit()
