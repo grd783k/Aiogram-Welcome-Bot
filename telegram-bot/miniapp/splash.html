@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <title>Guardiola Farm 66</title>
+
+  <!--
+    Telegram Mini App SDK — doit être la première balise <script>.
+    Donne accès à window.Telegram.WebApp, HapticFeedback, initDataUnsafe, etc.
+  -->
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+
+  <style>
+    /* ── Reset ──────────────────────────────────────────────────────────── */
+    *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+
+    /* ── Splash overlay ─────────────────────────────────────────────────── */
+    #splash {
+      position: fixed;
+      inset: 0;
+      background: #000;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+      opacity: 1;
+      transition: opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+      overflow: hidden;
+      -webkit-user-select: none;
+      user-select: none;
+    }
+    #splash.fade-out {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    /* Ambient radial glow (CSS-only, zero JS cost) */
+    #splash::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background: radial-gradient(ellipse 60% 50% at 50% 48%,
+        rgba(34, 197, 94, 0.06) 0%, transparent 100%);
+      pointer-events: none;
+    }
+
+    /* ── Logo wrapper ───────────────────────────────────────────────────── */
+    .s-logo-wrap {
+      position: relative;
+      margin-bottom: 56px;
+    }
+
+    /* Pulsing glow halo behind the logo */
+    .s-logo-halo {
+      position: absolute;
+      inset: -28px;
+      border-radius: 50%;
+      background: radial-gradient(circle,
+        rgba(34, 197, 94, 0.20) 0%, transparent 68%);
+      animation: s-glow-pulse 2.4s ease-in-out infinite;
+    }
+
+    /* Logo card */
+    .s-logo-card {
+      position: relative;
+      width: 96px;
+      height: 96px;
+      border-radius: 24px;
+      background: linear-gradient(150deg, #141414 0%, #0c0c0c 100%);
+      border: 1.5px solid rgba(34, 197, 94, 0.22);
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      box-shadow:
+        0 0 40px rgba(34, 197, 94, 0.10),
+        0 0 12px rgba(34, 197, 94, 0.06),
+        inset 0 1px 0 rgba(255, 255, 255, 0.04);
+      /* Start hidden — animation reveals it */
+      opacity: 0;
+      animation: s-logo-in 0.55s 0.05s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+    }
+
+    /*
+      ── Logo image ────────────────────────────────────────────────────────
+      Remplacez "logo.png" par le chemin réel de votre logo.
+      Si l'image est absente, le bloc .s-logo-text s'affiche à la place.
+    */
+    .s-logo-img {
+      width: 64px;
+      height: 64px;
+      object-fit: contain;
+    }
+
+    /* Fallback text mark (affiché si logo.png absent) */
+    .s-logo-text {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+    .s-logo-letter {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 30px;
+      font-weight: 800;
+      color: #22c55e;
+      letter-spacing: -1px;
+      line-height: 1;
+    }
+    .s-logo-sub {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+      font-size: 11px;
+      font-weight: 700;
+      color: rgba(34, 197, 94, 0.55);
+      letter-spacing: 2.5px;
+      margin-top: 3px;
+    }
+
+    /* ── Progress section ───────────────────────────────────────────────── */
+    .s-progress-section {
+      width: min(268px, 80vw);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    /* Top row */
+    .s-top-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .s-label {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 11px;
+      color: rgba(255, 255, 255, 0.18);
+      letter-spacing: 0.4px;
+    }
+    .s-pct {
+      font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
+      font-size: 12px;
+      font-weight: 600;
+      color: #22c55e;
+      min-width: 34px;
+      text-align: right;
+    }
+
+    /* Bar */
+    .s-bar-track {
+      height: 3px;
+      background: rgba(255, 255, 255, 0.07);
+      border-radius: 999px;
+      overflow: hidden;
+    }
+    .s-bar-fill {
+      height: 100%;
+      width: 0%;
+      border-radius: 999px;
+      background: linear-gradient(90deg, #15803d, #22c55e 50%, #86efac);
+      background-size: 200% 100%;
+      box-shadow: 0 0 12px rgba(34, 197, 94, 0.65), 0 0 5px rgba(34, 197, 94, 0.4);
+      /* No transition here — JS sets width directly for smooth RAF control */
+    }
+    .s-bar-fill.animate-shimmer {
+      animation: s-bar-shimmer 1.4s linear infinite;
+    }
+
+    /* Status / Welcome message */
+    .s-msg {
+      font-family: system-ui, -apple-system, sans-serif;
+      font-size: 12px;
+      color: rgba(255, 255, 255, 0.32);
+      letter-spacing: 0.3px;
+      text-align: center;
+      min-height: 18px;
+      transition: color 0.25s ease, opacity 0.18s ease;
+    }
+    .s-msg.welcome {
+      color: rgba(255, 255, 255, 0.60);
+    }
+
+    /* ── Main app (hidden until splash finishes) ────────────────────────── */
+    #app {
+      opacity: 0;
+      transition: opacity 0.38s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    #app.visible {
+      opacity: 1;
+    }
+
+    /* ── Keyframes ──────────────────────────────────────────────────────── */
+    @keyframes s-logo-in {
+      0%   { opacity: 0; transform: scale(0.80); }
+      62%  { opacity: 1; transform: scale(1.07); }
+      100% { opacity: 1; transform: scale(1.00); }
+    }
+
+    @keyframes s-glow-pulse {
+      0%, 100% { opacity: 0.65; transform: scale(1.00); }
+      50%       { opacity: 1.00; transform: scale(1.14); }
+    }
+
+    @keyframes s-bar-shimmer {
+      0%   { background-position: 200% center; }
+      100% { background-position: -200% center; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       SPLASH SCREEN
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="splash">
+
+    <!-- Logo -->
+    <div class="s-logo-wrap">
+      <div class="s-logo-halo"></div>
+      <div class="s-logo-card">
+        <!--
+          Option A — Logo image (recommandé)
+          Remplacez "logo.png" par le chemin de votre fichier logo.
+          onerror bascule automatiquement sur le fallback texte.
+        -->
+        <img
+          class="s-logo-img"
+          src="logo.png"
+          alt=""
+          onerror="this.style.display='none'; document.getElementById('logo-fallback').style.display='flex';"
+        />
+        <!-- Option B — Fallback texte si logo.png est absent -->
+        <div class="s-logo-text" id="logo-fallback" style="display:none;">
+          <span class="s-logo-letter">G</span>
+          <span class="s-logo-sub">66</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Progress -->
+    <div class="s-progress-section">
+      <div class="s-top-row">
+        <span class="s-label" id="s-label">Chargement</span>
+        <span class="s-pct"  id="s-pct">0%</span>
+      </div>
+      <div class="s-bar-track">
+        <div class="s-bar-fill" id="s-bar"></div>
+      </div>
+      <div class="s-msg" id="s-msg">Initialisation…</div>
+    </div>
+
+  </div><!-- /#splash -->
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       VOTRE APPLICATION
+       Remplacez ce commentaire par le contenu HTML de votre Mini App.
+       Ou chargez votre framework JS ici (React, Vue, etc.)
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <div id="app">
+    <!-- Contenu principal de la Mini App -->
+  </div>
+
+
+  <!-- ═══════════════════════════════════════════════════════════════════════
+       SCRIPT D'ANIMATION
+       Pure JS — aucune dépendance externe.
+       ═══════════════════════════════════════════════════════════════════════ -->
+  <script>
+    (function () {
+      'use strict';
+
+      /* ── Paramètres ───────────────────────────────────────────────────── */
+      var LOGO_DELAY_MS    = 280;   // délai avant le démarrage de la barre
+      var PROGRESS_MS      = 1600;  // durée totale 0 → 100 %
+      var HOLD_MS          = 550;   // pause à 100 % avant le fondu
+      var FADE_MS          = 380;   // durée du fondu de sortie
+
+      var MESSAGES = [
+        'Initialisation…',
+        'Connexion sécurisée…',
+        'Chargement du shop…',
+        'Vérification des données…',
+        'Finalisation…',
+      ];
+
+      /* ── Récupération du prénom Telegram ─────────────────────────────── */
+      var firstName = 'vous';
+      try {
+        var tg = window.Telegram && window.Telegram.WebApp;
+        if (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) {
+          firstName = tg.initDataUnsafe.user.first_name || firstName;
+        }
+      } catch (_) { /* silently ignored — firstName reste 'vous' */ }
+
+      /* ── DOM refs ─────────────────────────────────────────────────────── */
+      var splashEl = document.getElementById('splash');
+      var barEl    = document.getElementById('s-bar');
+      var pctEl    = document.getElementById('s-pct');
+      var msgEl    = document.getElementById('s-msg');
+      var labelEl  = document.getElementById('s-label');
+      var appEl    = document.getElementById('app');
+
+      /* ── Fin du splash ────────────────────────────────────────────────── */
+      function endSplash() {
+        splashEl.classList.add('fade-out');
+        appEl.classList.add('visible');
+        setTimeout(function () {
+          splashEl.style.display = 'none';
+        }, FADE_MS + 100);
+      }
+
+      /* ── Animation principale (RAF) ───────────────────────────────────── */
+      function startProgress() {
+        barEl.classList.add('animate-shimmer');
+        var startTime = null;
+        var lastMsgIndex = -1;
+
+        function tick(now) {
+          if (!startTime) startTime = now;
+          var elapsed = now - startTime;
+          var pct = Math.min(100, Math.floor((elapsed / PROGRESS_MS) * 100));
+
+          /* Mise à jour de l'affichage */
+          barEl.style.width = pct + '%';
+          pctEl.textContent = pct + '%';
+
+          /* Mise à jour du message (transition animée si changement) */
+          var msgIdx = Math.min(Math.floor(pct / 20), MESSAGES.length - 1);
+          if (msgIdx !== lastMsgIndex) {
+            lastMsgIndex = msgIdx;
+            msgEl.style.opacity = '0';
+            setTimeout(function () {
+              msgEl.textContent = MESSAGES[msgIdx];
+              msgEl.style.opacity = '1';
+            }, 100);
+          }
+
+          if (pct < 100) {
+            requestAnimationFrame(tick);
+          } else {
+            /* ── 100 % atteint ── */
+            barEl.classList.remove('animate-shimmer');
+            labelEl.textContent = 'Prêt ✓';
+
+            /* Haptic feedback via Telegram WebApp API */
+            try {
+              var tg = window.Telegram && window.Telegram.WebApp;
+              if (tg && tg.HapticFeedback) {
+                tg.HapticFeedback.notificationOccurred('success');
+              }
+            } catch (_) {}
+
+            /* Message de bienvenue */
+            setTimeout(function () {
+              msgEl.classList.add('welcome');
+              msgEl.style.opacity = '0';
+              setTimeout(function () {
+                msgEl.textContent = '👋 Bienvenue, ' + firstName;
+                msgEl.style.opacity = '1';
+              }, 120);
+
+              /* Fondu de sortie après la pause */
+              setTimeout(endSplash, HOLD_MS);
+            }, 80);
+          }
+        }
+
+        requestAnimationFrame(tick);
+      }
+
+      /* ── Initialisation ───────────────────────────────────────────────── */
+
+      /* Notifier Telegram que la Mini App est prête */
+      try {
+        if (window.Telegram && window.Telegram.WebApp) {
+          window.Telegram.WebApp.ready();
+        }
+      } catch (_) {}
+
+      /* Démarrer après le délai logo */
+      setTimeout(startProgress, LOGO_DELAY_MS);
+
+    })();
+  </script>
+
+</body>
+</html>
