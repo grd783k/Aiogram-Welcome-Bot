@@ -5,8 +5,8 @@ set -e
 echo "[start.sh] Building API server…"
 pnpm --filter @workspace/api-server run build
 
-echo "[start.sh] Starting Telegram bot in background…"
-python3 telegram-bot/bot.py &
+echo "[start.sh] Starting Telegram bot in background (BOT_ENV=production)…"
+BOT_ENV=production python3 telegram-bot/bot.py &
 BOT_PID=$!
 
 echo "[start.sh] Starting API server on PORT=${PORT}…"
