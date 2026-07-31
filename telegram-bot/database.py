@@ -57,6 +57,14 @@ def init_db() -> None:
                 visited_at TEXT    NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS broadcast_messages (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                chat_id    INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                sent_at    TEXT    NOT NULL
+            )
+        """)
         conn.commit()
 
 
@@ -120,6 +128,35 @@ def visits_today() -> int:
             "SELECT COUNT(*) FROM visits WHERE visited_at >= ?",
             (today,),
         ).fetchone()[0]
+
+
+# ── Broadcast messages ────────────────────────────────────────────────────────
+
+def save_broadcast_message(chat_id: int, message_id: int) -> None:
+    """Record a broadcast message_id so it can be deleted on demand."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO broadcast_messages (chat_id, message_id, sent_at) VALUES (?, ?, ?)",
+            (chat_id, message_id, now),
+        )
+        conn.commit()
+
+
+def get_all_broadcast_messages() -> list[sqlite3.Row]:
+    """Return all saved broadcast message records."""
+    with _connect() as conn:
+        return conn.execute(
+            "SELECT chat_id, message_id FROM broadcast_messages"
+        ).fetchall()
+
+
+def clear_broadcast_messages() -> int:
+    """Delete all broadcast message records. Returns the number of rows deleted."""
+    with _connect() as conn:
+        cursor = conn.execute("DELETE FROM broadcast_messages")
+        conn.commit()
+        return cursor.rowcount
 
 
 # ── Daily messages ────────────────────────────────────────────────────────────

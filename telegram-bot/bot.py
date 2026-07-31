@@ -21,12 +21,15 @@ from aiogram.types import (
 )
 
 from database import (
+    clear_broadcast_messages,
     clear_daily_messages,
+    get_all_broadcast_messages,
     get_all_daily_messages,
     get_all_users,
     init_db,
     log_visit,
     register_user,
+    save_broadcast_message,
     save_daily_message,
     user_count,
     visits_today,
@@ -262,6 +265,56 @@ async def stats_handler(message: types.Message) -> None:
     schedule_deletion(sent)
 
 
+@dp.message(Command("deletebroadcast"))
+async def deletebroadcast_handler(message: Message) -> None:
+    if not is_admin(message.from_user.id):
+        await message.answer("⛔ Accès refusé.")
+        return
+
+    records = get_all_broadcast_messages()
+    if not records:
+        await message.answer("ℹ️ Aucun message de diffusion à supprimer.")
+        return
+
+    total   = len(records)
+    deleted = 0
+    failed  = 0
+
+    progress = await message.answer(f"🗑 Suppression en cours… 0 / {total}")
+
+    for i, rec in enumerate(records, start=1):
+        try:
+            await bot.delete_message(chat_id=rec["chat_id"], message_id=rec["message_id"])
+            deleted += 1
+        except (TelegramBadRequest, TelegramForbiddenError):
+            failed += 1   # already deleted or bot blocked — ignore silently
+        except Exception as e:
+            logger.warning("deletebroadcast error chat_id=%s: %s", rec["chat_id"], e)
+            failed += 1
+
+        if i % 10 == 0 or i == total:
+            try:
+                await progress.edit_text(f"🗑 Suppression en cours… {i} / {total}")
+            except Exception:
+                pass
+        await asyncio.sleep(0.05)
+
+    cleared = clear_broadcast_messages()
+    try:
+        await progress.delete()
+    except Exception:
+        pass
+
+    report = (
+        f"🗑 *Suppression terminée*\n"
+        f"✅ Supprimé : {deleted}\n"
+        f"❌ Déjà supprimé / inaccessible : {failed}\n"
+        f"🗂 Enregistrements effacés : {cleared}"
+    )
+    sent = await message.answer(report, parse_mode="Markdown")
+    schedule_deletion(sent)
+
+
 @dp.message(Command("broadcast"))
 async def broadcast_start(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
@@ -296,7 +349,8 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
 
     for i, user in enumerate(users, start=1):
         try:
-            await bot.send_message(chat_id=user["chat_id"], text=broadcast_text)
+            msg = await bot.send_message(chat_id=user["chat_id"], text=broadcast_text)
+            save_broadcast_message(chat_id=user["chat_id"], message_id=msg.message_id)
             sent_count += 1
         except (TelegramBadRequest, TelegramForbiddenError):
             failed_count += 1
