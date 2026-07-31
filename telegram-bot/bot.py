@@ -2,9 +2,15 @@ import asyncio
 import logging
 import os
 
-from aiogram import Bot, Dispatcher, types
+from aiogram import Bot, Dispatcher, F, types
 from aiogram.filters import Command, CommandStart
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
+from aiogram.types import (
+    CallbackQuery,
+    FSInputFile,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    WebAppInfo,
+)
 
 # Remove all whitespace (spaces, newlines, tabs) in case the token was pasted with extra characters
 BOT_TOKEN = "".join((os.environ.get("BOT_TOKEN") or "").split())
@@ -18,43 +24,52 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp = Dispatcher()
 
+# ── Keyboards ────────────────────────────────────────────────────────────────
 
-@dp.message(CommandStart())
-async def start_handler(message: types.Message) -> None:
-    keyboard = InlineKeyboardMarkup(
+def start_keyboard() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
         inline_keyboard=[
             [
                 InlineKeyboardButton(
                     text="🥷 Ouvrir le Shop",
                     web_app=WebAppInfo(url="https://www.guardiola66.com/login"),
                 )
-            ]
+            ],
+            [
+                InlineKeyboardButton(
+                    text="💬 Contact WhatsApp",
+                    url="https://wa.me/212625902052",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="📢 horraire",
+                    callback_data="horraire",
+                )
+            ],
         ]
     )
+
+
+# ── Handlers ─────────────────────────────────────────────────────────────────
+
+@dp.message(CommandStart())
+async def start_handler(message: types.Message) -> None:
+    text = (
+        "👋 Bienvenue sur la mini-app !\n\n"
+        "Clique sur le bouton ci-dessous pour ouvrir le shop."
+    )
+    keyboard = start_keyboard()
 
     video_path = os.path.join(os.path.dirname(__file__), "welcome.mp4")
 
     if not os.path.exists(video_path):
-        # Fallback: send only text if the video file is missing
         logger.warning("welcome.mp4 not found — sending text only.")
-        await message.answer(
-            text=(
-                "👋 Bienvenue sur la mini-app !\n\n"
-                "Clique sur le bouton ci-dessous pour ouvrir le shop."
-            ),
-            reply_markup=keyboard,
-        )
+        await message.answer(text=text, reply_markup=keyboard)
         return
 
     video = FSInputFile(video_path)
-    await message.answer_video(
-        video=video,
-        caption=(
-            "👋 Bienvenue sur la mini-app !\n\n"
-            "Clique sur le bouton ci-dessous pour ouvrir le shop."
-        ),
-        reply_markup=keyboard,
-    )
+    await message.answer_video(video=video, caption=text, reply_markup=keyboard)
 
 
 @dp.message(Command("contact"))
@@ -69,11 +84,16 @@ async def contact_handler(message: types.Message) -> None:
             ]
         ]
     )
-    await message.answer(
-        text="📱 Contact WhatsApp",
-        reply_markup=keyboard,
-    )
+    await message.answer(text="📱 Contact WhatsApp", reply_markup=keyboard)
 
+
+@dp.callback_query(F.data == "horraire")
+async def horraire_callback(callback: CallbackQuery) -> None:
+    await callback.answer()  # dismiss the loading spinner
+    await callback.message.answer(text="Midi - minuit")
+
+
+# ── Entry point ───────────────────────────────────────────────────────────────
 
 async def main() -> None:
     logger.info("Starting bot…")
