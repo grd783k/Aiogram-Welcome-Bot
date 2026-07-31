@@ -31,19 +31,19 @@ def start_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🥷 Ouvrir le Shop",
+                    text="🥷 Ouvrir le menu",
                     web_app=WebAppInfo(url="https://www.guardiola66.com/login"),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="💬 Contact WhatsApp",
+                    text="💬 Contact",
                     url="https://wa.me/212625902052",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📢 horraire",
+                    text="📢 horaire",
                     callback_data="horraire",
                 )
             ],
@@ -55,7 +55,7 @@ def start_keyboard() -> InlineKeyboardMarkup:
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
-    text = "👋 Bienvenue sur la mini - app guardiola 66"
+    text = "👋 Bienvenue sur la mini app guardiola 66"
     keyboard = start_keyboard()
 
     video_path = os.path.join(os.path.dirname(__file__), "welcome.mp4")
