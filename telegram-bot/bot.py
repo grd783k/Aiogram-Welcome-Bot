@@ -78,7 +78,11 @@ def start_keyboard() -> InlineKeyboardMarkup:
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
-    text = "👋 Bienvenue sur la mini app guardiola"
+    user = message.from_user
+    name = (user.first_name if user and user.first_name else None) or \
+           (user.username if user and user.username else None)
+    text = f"👋 Bienvenue sur la mini App guardiola , {name} !" if name \
+           else "👋 Bienvenue sur la mini App guardiola !"
     keyboard = start_keyboard()
 
     video_path = os.path.join(os.path.dirname(__file__), "welcome.mp4")
