@@ -131,24 +131,24 @@ export function SplashScreen() {
             animation:    "glow-pulse 2.4s ease-in-out infinite",
           }} />
 
-          {/* Logo card */}
+          {/* Logo card — circular, real brand logo */}
           <div style={{
-            width:        96,
-            height:       96,
-            borderRadius: 24,
-            background:   "linear-gradient(150deg, #141414 0%, #0c0c0c 100%)",
-            border:       "1.5px solid rgba(34,197,94,0.22)",
+            width:        160,
+            height:       160,
+            borderRadius: "50%",
+            background:   "transparent",
+            border:       "none",
             display:      "flex",
-            flexDirection:"column",
             alignItems:   "center",
             justifyContent:"center",
             animation:    "logo-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both",
-            boxShadow:    "0 0 40px rgba(34,197,94,0.10), 0 0 12px rgba(34,197,94,0.06), inset 0 1px 0 rgba(255,255,255,0.04)",
+            boxShadow:    "0 0 56px rgba(34,197,94,0.18), 0 0 18px rgba(34,197,94,0.10)",
+            overflow:     "hidden",
           }}>
             <img
-              src="/api/logo.svg"
+              src="/api/logo.webp"
               alt="Guardiola Farm 66"
-              style={{ width: 64, height: 64, objectFit: "contain" }}
+              style={{ width: 160, height: 160, objectFit: "cover", borderRadius: "50%", display: "block" }}
             />
           </div>
         </div>
