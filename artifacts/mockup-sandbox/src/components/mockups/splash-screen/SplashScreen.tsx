@@ -94,6 +94,10 @@ export function SplashScreen() {
           from { opacity: 0; transform: translateY(4px); }
           to   { opacity: 1; transform: translateY(0); }
         }
+        @keyframes bienvenue-in {
+          0%   { opacity: 0; transform: translateY(-10px); }
+          100% { opacity: 1; transform: translateY(0); }
+        }
       `}</style>
 
       {/* ── Splash overlay ──────────────────────────────────────────────────── */}
@@ -119,6 +123,22 @@ export function SplashScreen() {
           background:    "radial-gradient(ellipse 60% 50% at 50% 48%, rgba(59,130,246,0.06) 0%, transparent 100%)",
           pointerEvents: "none",
         }} />
+
+        {/* ── Bienvenue ───────────────────────────────────────────────────── */}
+        <div style={{
+          fontFamily:    "system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+          fontSize:      20,
+          fontWeight:    200,
+          letterSpacing: "7px",
+          textTransform: "uppercase",
+          color:         "rgba(255,255,255,0.82)",
+          textShadow:    "0 0 18px rgba(59,130,246,0.60), 0 0 40px rgba(59,130,246,0.20)",
+          marginBottom:  28,
+          textAlign:     "center",
+          animation:     "bienvenue-in 0.55s 0.05s ease both",
+        }}>
+          Bienvenue
+        </div>
 
         {/* ── Logo ────────────────────────────────────────────────────────── */}
         <div style={{ position: "relative", marginBottom: 56 }}>

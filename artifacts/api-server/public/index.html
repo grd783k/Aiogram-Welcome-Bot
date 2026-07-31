@@ -38,6 +38,27 @@
       pointer-events: none;
     }
 
+    .s-bienvenue {
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      font-size: 20px;
+      font-weight: 200;
+      letter-spacing: 7px;
+      text-transform: uppercase;
+      color: rgba(255, 255, 255, 0.82);
+      text-shadow:
+        0 0 18px rgba(59, 130, 246, 0.60),
+        0 0 40px rgba(59, 130, 246, 0.20);
+      margin-bottom: 28px;
+      text-align: center;
+      opacity: 0;
+      animation: s-bienvenue-in 0.55s 0.05s ease forwards;
+    }
+
+    @keyframes s-bienvenue-in {
+      0%   { opacity: 0; transform: translateY(-10px); }
+      100% { opacity: 1; transform: translateY(0); }
+    }
+
     .s-logo-wrap { position: relative; margin-bottom: 56px; }
 
     .s-logo-halo {
@@ -141,6 +162,7 @@
 </head>
 <body>
   <div id="splash">
+    <div class="s-bienvenue">Bienvenue</div>
     <div class="s-logo-wrap">
       <div class="s-logo-halo"></div>
       <div class="s-logo-card">
