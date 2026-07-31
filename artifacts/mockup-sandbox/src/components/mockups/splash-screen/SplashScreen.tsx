@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import logoUrl from "../../../assets/logo.webp";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 const LOGO_DELAY_MS    = 280;   // ms before progress bar starts
@@ -166,7 +167,7 @@ export function SplashScreen() {
             overflow:     "hidden",
           }}>
             <img
-              src="/api/logo.webp"
+              src={logoUrl}
               alt="Guardiola Farm 66"
               style={{ width: 160, height: 160, objectFit: "cover", borderRadius: "50%", display: "block" }}
             />
