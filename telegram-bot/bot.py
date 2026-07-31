@@ -1,4 +1,5 @@
 import asyncio
+import html as html_mod
 import logging
 import os
 import re
@@ -109,16 +110,20 @@ async def _notify_admin_reliable(
     if not ADMIN_ID:
         return
     now   = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
-    uname = f"@{user.username}" if user.username else "—"
+    # html.escape() on ALL user-supplied strings — prevents Telegram parse errors
+    # when names/usernames contain _ * ` [ (Markdown special chars).
+    # We use HTML mode which is safer: only <>&" need escaping, and we control it.
+    fname = html_mod.escape(user.first_name or "—")
+    uname = html_mod.escape(f"@{user.username}" if user.username else "—")
     emoji = "🆕" if is_new else "🔄"
     label = "Nouvel utilisateur" if is_new else "Utilisateur existant"
     text  = (
-        f"{emoji} *{label}*\n"
-        f"👤 Prénom : {user.first_name or '—'}\n"
+        f"{emoji} <b>{label}</b>\n"
+        f"👤 Prénom : {fname}\n"
         f"📛 Username : {uname}\n"
-        f"🆔 User ID : `{user.id}`\n"
+        f"🆔 User ID : <code>{user.id}</code>\n"
         f"📅 Date : {now}\n"
-        f"📊 Total inscrits : *{total}*"
+        f"📊 Total inscrits : <b>{total}</b>"
     )
     for attempt in range(1, 4):
         logger.info(
@@ -126,7 +131,7 @@ async def _notify_admin_reliable(
             user.id, attempt, ADMIN_ID,
         )
         try:
-            result = await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
+            result = await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="HTML")
             logger.info(
                 "/start NOTIFY OK  user_id=%s  total=%d  attempt=%d  msg_id=%s",
                 user.id, total, attempt, result.message_id,
