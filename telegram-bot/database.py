@@ -25,8 +25,10 @@ DB_PATH = Path(__file__).parent / "users.db"
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")   # better concurrent read/write
+    conn.execute("PRAGMA synchronous=NORMAL") # safe + faster than FULL
     return conn
 
 
@@ -70,27 +72,32 @@ def init_db() -> None:
 
 # ── Users ─────────────────────────────────────────────────────────────────────
 
-def register_user(
+def register_user_atomic(
     user_id: int,
     chat_id: int,
     first_name: str,
     username: str | None,
-) -> bool:
+) -> tuple[bool, int]:
     """
-    Insert the user if not already registered.
-    Returns True if newly inserted, False if they already existed.
+    Atomically insert the user (if new) AND read the total count in one
+    transaction.  Returns (is_new, total_users).
+
+    Using a single transaction guarantees that the count returned is exactly
+    consistent with the insertion — no race window between two separate DB
+    calls, no possibility of returning a stale or inflated count.
     """
     now = datetime.now(timezone.utc).isoformat()
     with _connect() as conn:
         cursor = conn.execute(
-            """
-            INSERT OR IGNORE INTO users (user_id, chat_id, first_name, username, joined_at)
-            VALUES (?, ?, ?, ?, ?)
-            """,
+            "INSERT OR IGNORE INTO users "
+            "(user_id, chat_id, first_name, username, joined_at) "
+            "VALUES (?, ?, ?, ?, ?)",
             (user_id, chat_id, first_name or "", username, now),
         )
+        is_new = cursor.rowcount > 0
+        total  = conn.execute("SELECT COUNT(*) FROM users").fetchone()[0]
         conn.commit()
-        return cursor.rowcount > 0
+        return is_new, total
 
 
 def get_all_users() -> list[sqlite3.Row]:

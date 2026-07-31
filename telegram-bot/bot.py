@@ -28,7 +28,7 @@ from database import (
     get_all_users,
     init_db,
     log_visit,
-    register_user,
+    register_user_atomic,
     save_broadcast_message,
     save_daily_message,
     user_count,
@@ -93,26 +93,45 @@ def is_admin(user_id: int) -> bool:
     return ADMIN_ID is not None and user_id == ADMIN_ID
 
 
-async def notify_admin(user: types.User, is_new: bool) -> None:
+async def _notify_admin_reliable(
+    user: types.User,
+    is_new: bool,
+    total: int,           # exact count from the atomic DB transaction — no re-read
+) -> None:
+    """
+    Send the admin notification for a /start event.
+    • total is passed in (not re-read) — single source of truth, no race.
+    • Retries up to 3 times with exponential back-off on Telegram API errors.
+    • Every attempt and failure is logged.
+    """
     if not ADMIN_ID:
         return
-    now = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
-    username_display = f"@{user.username}" if user.username else "—"
-    total = user_count()
+    now   = datetime.now(TZ).strftime("%d/%m/%Y %H:%M")
+    uname = f"@{user.username}" if user.username else "—"
     emoji = "🆕" if is_new else "🔄"
-    label = "Nouvel utilisateur" if is_new else "Utilisateur existant — a relancé le bot"
-    text = (
+    label = "Nouvel utilisateur" if is_new else "Utilisateur existant"
+    text  = (
         f"{emoji} *{label}*\n"
         f"👤 Prénom : {user.first_name or '—'}\n"
-        f"📛 Username : {username_display}\n"
+        f"📛 Username : {uname}\n"
         f"🆔 User ID : `{user.id}`\n"
         f"📅 Date : {now}\n"
         f"📊 Total inscrits : *{total}*"
     )
-    try:
-        await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
-    except Exception as e:
-        logger.warning("notify_admin failed: %s", e)
+    for attempt in range(1, 4):
+        try:
+            await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
+            logger.info("/start NOTIFIED  user_id=%s  total=%d  attempt=%d", user.id, total, attempt)
+            return
+        except Exception as exc:
+            wait = 2 ** attempt          # 2 s, 4 s, 8 s
+            logger.warning(
+                "/start NOTIFY FAILED  attempt=%d/3  user_id=%s  error=%s  retry_in=%ds",
+                attempt, user.id, exc, wait if attempt < 3 else 0,
+            )
+            if attempt < 3:
+                await asyncio.sleep(wait)
+    logger.error("/start NOTIFY ABANDONED  user_id=%s  all 3 attempts failed", user.id)
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -204,49 +223,44 @@ async def scheduler_close() -> None:
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
-async def _post_start(user: types.User, chat_id: int) -> None:
-    """Background task: DB writes + admin notification after the reply is already sent."""
-    is_new = register_user(
-        user_id=user.id,
-        chat_id=chat_id,
-        first_name=user.first_name or "",
-        username=user.username,
-    )
-    log_visit(user.id)
-    logger.info("%s user: id=%s name=%s", "New" if is_new else "Returning", user.id, user.first_name)
-    await notify_admin(user, is_new)
-
-
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
     global _welcome_file_id
     loop = asyncio.get_event_loop()
     t0   = loop.time()
-
     user = message.from_user
 
-    # ── How long did this update wait before the bot received it? ─────────────
-    now_utc     = datetime.now(timezone.utc)
-    update_age  = (now_utc - message.date.replace(tzinfo=timezone.utc)).total_seconds()
-    logger.info(
-        "/start RECEIVED  update_age=%.1fs  cached=%s  user_id=%s",
-        update_age,
-        _welcome_file_id is not None,
-        user.id if user else "?",
-    )
+    # ── [1] Diagnostics ───────────────────────────────────────────────────────
+    now_utc    = datetime.now(timezone.utc)
+    update_age = (now_utc - message.date.replace(tzinfo=timezone.utc)).total_seconds()
+    logger.info("/start RECEIVED  user_id=%s  update_age=%.1fs  cached=%s",
+                user.id if user else "?", update_age, _welcome_file_id is not None)
 
-    # ── Build reply text (pure Python, ~0 ms) ────────────────────────────────
-    t1   = loop.time()
+    # ── [2] DB: atomic register + count (~1–2 ms, sync, before reply) ─────────
+    #   register_user_atomic does INSERT OR IGNORE + COUNT in one transaction,
+    #   guaranteeing the returned total is exactly consistent with the insert.
+    if user:
+        is_new, total = register_user_atomic(
+            user_id    = user.id,
+            chat_id    = message.chat.id,
+            first_name = user.first_name or "",
+            username   = user.username,
+        )
+        log_visit(user.id)
+        logger.info("/start DB  %s  user_id=%s  total_users=%d",
+                    "NEW" if is_new else "RETURNING", user.id, total)
+    else:
+        is_new, total = False, user_count()
+
+    # ── [3] Send reply immediately ─────────────────────────────────────────────
+    t2   = loop.time()
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
-    text = f"👋 Bienvenue sur la mini App , {name} !" if name \
-           else "👋 Bienvenue sur la mini App !"
+    text       = f"👋 Bienvenue sur la mini App , {name} !" if name \
+                 else "👋 Bienvenue sur la mini App !"
     keyboard   = start_keyboard()
     photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
-    logger.info("/start PREPARED  prep=%.0f ms", (loop.time() - t1) * 1000)
 
-    # ── Telegram API call (network round-trip to api.telegram.org) ───────────
-    t2 = loop.time()
     if _welcome_file_id:
         sent = await message.answer_photo(
             photo=_welcome_file_id, caption=text, reply_markup=keyboard
@@ -258,19 +272,21 @@ async def start_handler(message: types.Message) -> None:
         )
         if sent.photo:
             _welcome_file_id = sent.photo[-1].file_id
-        logger.info("/start SENT (uploaded file)  api=%.0f ms", (loop.time() - t2) * 1000)
+            logger.info("/start SENT (uploaded + file_id cached)  api=%.0f ms",
+                        (loop.time() - t2) * 1000)
+        else:
+            logger.info("/start SENT (uploaded file)  api=%.0f ms", (loop.time() - t2) * 1000)
     else:
         sent = await message.answer(text=text, reply_markup=keyboard)
         logger.info("/start SENT (text only)  api=%.0f ms", (loop.time() - t2) * 1000)
 
-    logger.info("/start TOTAL=%.0f ms  [update_age=%.1fs  cached=%s]",
-                (loop.time() - t0) * 1000, update_age, _welcome_file_id is not None)
-
+    logger.info("/start TOTAL=%.0f ms  [update_age=%.1fs  total=%d  new=%s]",
+                (loop.time() - t0) * 1000, update_age, total, is_new)
     schedule_deletion(sent)
 
-    # ── DB writes + admin notification run in background ─────────────────────
+    # ── [4] Admin notification — background task, 3 retry attempts ────────────
     if user:
-        asyncio.create_task(_post_start(user, message.chat.id))
+        asyncio.create_task(_notify_admin_reliable(user, is_new, total))
 
 
 @dp.message(Command("contact"))
