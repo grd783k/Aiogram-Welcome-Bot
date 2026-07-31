@@ -89,6 +89,14 @@ def init_db() -> None:
                     value TEXT NOT NULL
                 )
             """)
+            # Coordination lock: prevents dev and production from polling simultaneously.
+            # Production writes a heartbeat every 30 s; dev checks it before starting polling.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS bot_heartbeat (
+                    env       TEXT PRIMARY KEY,
+                    last_seen TEXT NOT NULL
+                )
+            """)
         conn.commit()
 
 
@@ -235,6 +243,44 @@ def clear_daily_messages() -> int:
             count = cur.rowcount
         conn.commit()
         return count
+
+
+# ── Bot heartbeat (dev/production conflict prevention) ────────────────────────
+
+HEARTBEAT_STALE_SECS = 90  # heartbeat older than this means the instance is gone
+
+def set_bot_heartbeat(env: str) -> None:
+    """Upsert a heartbeat timestamp for *env* ('production' or 'development')."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO bot_heartbeat (env, last_seen) VALUES (%s, %s)
+                ON CONFLICT (env) DO UPDATE SET last_seen = EXCLUDED.last_seen
+                """,
+                (env, now),
+            )
+        conn.commit()
+
+
+def get_bot_heartbeat(env: str) -> "datetime | None":
+    """Return the last heartbeat datetime for *env*, or None if absent."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT last_seen FROM bot_heartbeat WHERE env = %s", (env,))
+            row = cur.fetchone()
+            if not row:
+                return None
+            return datetime.fromisoformat(row["last_seen"])
+
+
+def clear_bot_heartbeat(env: str) -> None:
+    """Remove the heartbeat row for *env* (called on clean shutdown)."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute("DELETE FROM bot_heartbeat WHERE env = %s", (env,))
+        conn.commit()
 
 
 # ── Config ────────────────────────────────────────────────────────────────────

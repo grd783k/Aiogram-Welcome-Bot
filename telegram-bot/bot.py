@@ -3,11 +3,13 @@ import html as html_mod
 import logging
 import os
 import re
+import signal
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, types
-from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
+from aiogram.exceptions import TelegramBadRequest, TelegramConflictError, TelegramForbiddenError
+from aiogram.methods import GetUpdates
 from aiogram.filters import Command, CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -23,17 +25,21 @@ from aiogram.types import (
 )
 
 from database import (
+    HEARTBEAT_STALE_SECS,
+    clear_bot_heartbeat,
     clear_broadcast_messages,
     clear_daily_messages,
     get_all_broadcast_messages,
     get_all_daily_messages,
     get_all_users,
+    get_bot_heartbeat,
     get_config,
     init_db,
     log_visit,
     register_user_atomic,
     save_broadcast_message,
     save_daily_message,
+    set_bot_heartbeat,
     set_config,
     user_count,
     visits_today,
@@ -478,6 +484,60 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
     sent = await message.answer(report, parse_mode="Markdown")
     schedule_deletion(sent)
 
+# ── Heartbeat helpers (dev/production conflict prevention) ────────────────────
+
+def _production_is_active() -> bool:
+    """
+    Return True if a production heartbeat was written within the last
+    HEARTBEAT_STALE_SECS seconds.  Both dev and production share the same
+    PostgreSQL database, making this check reliable across containers.
+    On any DB error we return False (fail-open: let dev proceed).
+    """
+    try:
+        ts = get_bot_heartbeat("production")
+        if ts is None:
+            return False
+        # Normalise to UTC-aware for comparison
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        age = (datetime.now(timezone.utc) - ts).total_seconds()
+        logger.debug("Production heartbeat age: %.1f s (stale after %d s)", age, HEARTBEAT_STALE_SECS)
+        return age < HEARTBEAT_STALE_SECS
+    except Exception as exc:
+        logger.warning("Could not check production heartbeat: %s", exc)
+        return False  # assume no conflict if DB is unreachable
+
+
+async def _heartbeat_loop(env: str, interval: int = 30) -> None:
+    """Write a fresh heartbeat for *env* every *interval* seconds."""
+    while True:
+        try:
+            set_bot_heartbeat(env)
+        except Exception as exc:
+            logger.warning("Heartbeat write failed: %s", exc)
+        await asyncio.sleep(interval)
+
+
+def _register_shutdown_heartbeat_clear(env: str) -> None:
+    """
+    On SIGTERM (container stop), clear the heartbeat so dev instances don't
+    wait unnecessarily for HEARTBEAT_STALE_SECS to expire.
+    """
+    original = signal.getsignal(signal.SIGTERM)
+
+    def _handler(signum, frame):
+        try:
+            clear_bot_heartbeat(env)
+            logger.info("SIGTERM — %s heartbeat cleared.", env)
+        except Exception:
+            pass
+        # Restore original handler and re-deliver the signal
+        signal.signal(signal.SIGTERM, original if callable(original) else signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    signal.signal(signal.SIGTERM, _handler)
+
+
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 async def main() -> None:
@@ -490,7 +550,26 @@ async def main() -> None:
         logger.info("Loaded welcome_file_id from DB (length=%d)", len(_welcome_file_id))
     else:
         logger.info("No welcome_file_id in DB — will upload on first /start")
-    logger.info("Starting bot… (admin_id=%s)", ADMIN_ID)
+
+    bot_env = os.environ.get("BOT_ENV", "production")
+    logger.info("Starting bot… (admin_id=%s, env=%s)", ADMIN_ID, bot_env)
+
+    if bot_env == "development":
+        # ── Dev: check shared DB heartbeat before even attempting to poll ─────
+        if _production_is_active():
+            logger.warning(
+                "⚠️  PRODUCTION ACTIVE (heartbeat récent en base) — "
+                "le workflow dev n'essaie pas de démarrer le polling pour éviter "
+                "tout conflit. Arrêtez la production avant de relancer le dev."
+            )
+            return  # sortie propre, déterministe, indépendante de l'ordre de démarrage
+        logger.info("No active production heartbeat — dev polling authorised.")
+    else:
+        # ── Production: write initial heartbeat and keep it alive ─────────────
+        set_bot_heartbeat("production")
+        asyncio.create_task(_heartbeat_loop("production"))
+        _register_shutdown_heartbeat_clear("production")
+        logger.info("Production heartbeat started.")
 
     # ── Sync the Menu button (blue Telegram button) to the same URL as the
     #    inline "Ouvrir le menu" button so both entry points hit the splash screen.
@@ -510,7 +589,79 @@ async def main() -> None:
     asyncio.create_task(scheduler_open())
     asyncio.create_task(scheduler_close())
 
-    await dp.start_polling(bot, skip_updates=True)
+    # ── Custom polling loop — intercepts TelegramConflictError before aiogram's
+    #    internal _listen_updates() retry loop swallows it.
+    # ─────────────────────────────────────────────────────────────────────────
+    POLLING_TIMEOUT   = 25    # long-poll wait time (seconds)
+    CONFLICT_DELAY    = 10    # seconds before production retries after a 409
+    ERROR_DELAY       = 3     # seconds before retrying any other transient error
+
+    # Compute request-level timeout: session timeout + polling wait
+    try:
+        _session_timeout = bot.session.timeout or 30
+    except Exception:
+        _session_timeout = 30
+    request_timeout = int(_session_timeout + POLLING_TIMEOUT)
+
+    allowed_updates = dp.resolve_used_update_types()
+    offset = 0
+
+    # Emit startup lifecycle (FSM storage init, on_startup handlers, etc.)
+    workflow_data = {
+        "dispatcher": dp,
+        "bots": (bot,),
+        **dp.workflow_data,
+    }
+    await dp.emit_startup(bot=bot, **{k: v for k, v in workflow_data.items() if k not in ("bot",)})
+
+    try:
+        while True:
+            get_updates = GetUpdates(
+                offset=offset,
+                timeout=POLLING_TIMEOUT,
+                allowed_updates=allowed_updates,
+            )
+            try:
+                updates = await bot(get_updates, request_timeout=request_timeout)
+            except TelegramConflictError:
+                if bot_env == "development":
+                    logger.warning(
+                        "⚠️  CONFLICT 409 en dev — une autre instance (production) "
+                        "détient le verrou polling. Arrêt propre du workflow dev."
+                    )
+                    return
+                # Production: conflict is transient (dev just started/restarted).
+                # Wait for the other instance to release the lock, then retry.
+                logger.warning(
+                    "⚠️  CONFLICT 409 en production — attente %ds avant reprise…",
+                    CONFLICT_DELAY,
+                )
+                await asyncio.sleep(CONFLICT_DELAY)
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                logger.error("Erreur getUpdates: %s", exc, exc_info=True)
+                await asyncio.sleep(ERROR_DELAY)
+                continue
+
+            for update in updates:
+                if update.update_id >= offset:
+                    offset = update.update_id + 1
+                # Mirror aiogram's _polling(): use _process_update so handler
+                # exceptions are contained and return-based TelegramMethod
+                # responses are executed via silent_call_request.
+                # Track in-flight tasks on dp._handle_update_tasks exactly as
+                # aiogram does, enabling clean drain on shutdown.
+                coro = dp._process_update(bot=bot, update=update, **dp.workflow_data)
+                task = asyncio.create_task(coro)
+                dp._handle_update_tasks.add(task)
+                task.add_done_callback(dp._handle_update_tasks.discard)
+    finally:
+        await dp.emit_shutdown(
+            bot=bot, **{k: v for k, v in workflow_data.items() if k not in ("bot",)}
+        )
+        await bot.session.close()
 
 
 if __name__ == "__main__":
