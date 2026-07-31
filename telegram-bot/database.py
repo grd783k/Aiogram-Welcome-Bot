@@ -30,6 +30,13 @@ broadcast_messages
 config
     key         TEXT PRIMARY KEY
     value       TEXT NOT NULL
+
+pending_deletions
+    id          SERIAL PRIMARY KEY
+    chat_id     BIGINT NOT NULL       — chat where the bot message lives
+    message_id  BIGINT NOT NULL       — message to delete
+    delete_at   TEXT   NOT NULL       — ISO-8601 UTC timestamp of scheduled deletion
+    UNIQUE (chat_id, message_id)      — one row per message
 """
 
 import os
@@ -95,6 +102,17 @@ def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS bot_heartbeat (
                     env       TEXT PRIMARY KEY,
                     last_seen TEXT NOT NULL
+                )
+            """)
+            # Persistent auto-deletion queue — survives bot restarts.
+            # One row per scheduled message; deleted after the message is removed.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS pending_deletions (
+                    id         SERIAL PRIMARY KEY,
+                    chat_id    BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    delete_at  TEXT   NOT NULL,
+                    UNIQUE (chat_id, message_id)
                 )
             """)
         conn.commit()
@@ -243,6 +261,45 @@ def clear_daily_messages() -> int:
             count = cur.rowcount
         conn.commit()
         return count
+
+
+# ── Pending deletions ─────────────────────────────────────────────────────────
+
+def add_pending_deletion(chat_id: int, message_id: int, delete_at: str) -> None:
+    """Persist a scheduled deletion (ISO-8601 UTC timestamp). Idempotent."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO pending_deletions (chat_id, message_id, delete_at)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (chat_id, message_id) DO NOTHING
+                """,
+                (chat_id, message_id, delete_at),
+            )
+        conn.commit()
+
+
+def remove_pending_deletion(chat_id: int, message_id: int) -> None:
+    """Remove the deletion record once the message has been deleted."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM pending_deletions WHERE chat_id = %s AND message_id = %s",
+                (chat_id, message_id),
+            )
+        conn.commit()
+
+
+def get_all_pending_deletions() -> list[dict]:
+    """Return all scheduled deletions ordered by due time (oldest first)."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT chat_id, message_id, delete_at "
+                "FROM pending_deletions ORDER BY delete_at"
+            )
+            return cur.fetchall()
 
 
 # ── Bot heartbeat (dev/production conflict prevention) ────────────────────────

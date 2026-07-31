@@ -26,17 +26,20 @@ from aiogram.types import (
 
 from database import (
     HEARTBEAT_STALE_SECS,
+    add_pending_deletion,
     clear_bot_heartbeat,
     clear_broadcast_messages,
     clear_daily_messages,
     get_all_broadcast_messages,
     get_all_daily_messages,
+    get_all_pending_deletions,
     get_all_users,
     get_bot_heartbeat,
     get_config,
     init_db,
     log_visit,
     register_user_atomic,
+    remove_pending_deletion,
     save_broadcast_message,
     save_daily_message,
     set_bot_heartbeat,
@@ -82,20 +85,72 @@ _welcome_file_id: str | None = None
 class BroadcastState(StatesGroup):
     waiting_message = State()
 
-# ── Auto-delete helper (regular replies) ──────────────────────────────────────
+# ── Auto-delete helpers (persistent — survive bot restarts) ───────────────────
 
-async def delete_after(message: Message, delay: int = DELETE_AFTER) -> None:
-    await asyncio.sleep(delay)
+async def _delete_message_at(chat_id: int, message_id: int, delete_at_ts: float) -> None:
+    """
+    Wait until *delete_at_ts* (Unix epoch, UTC) then delete the message.
+    Always cleans up the DB record, whether the deletion succeeded or not.
+    Safe to call for the same message from multiple instances: Telegram
+    returns an error for an already-deleted message which we silently ignore.
+    """
+    delay = delete_at_ts - datetime.now(timezone.utc).timestamp()
+    if delay > 0:
+        await asyncio.sleep(delay)
     try:
-        await message.delete()
+        await bot.delete_message(chat_id=chat_id, message_id=message_id)
+        logger.debug("Auto-deleted msg %s in chat %s", message_id, chat_id)
     except (TelegramBadRequest, TelegramForbiddenError):
-        pass
+        pass  # already deleted or bot blocked — no action needed
     except Exception as e:
-        logger.debug("delete_after failed for msg %s: %s", message.message_id, e)
+        logger.debug("_delete_message_at failed chat=%s msg=%s: %s", chat_id, message_id, e)
+    finally:
+        remove_pending_deletion(chat_id, message_id)
 
 
-def schedule_deletion(message: Message) -> None:
-    asyncio.create_task(delete_after(message))
+def schedule_deletion(message: Message, delay: int = DELETE_AFTER) -> None:
+    """
+    Persist the deletion in the DB then schedule the asyncio task.
+    If the bot restarts before the deadline, reschedule_pending_deletions()
+    at startup will reload this record and re-create the task.
+    DB errors are caught so the in-memory fallback task is always created.
+    """
+    delete_at = datetime.now(timezone.utc) + timedelta(seconds=delay)
+    try:
+        add_pending_deletion(message.chat.id, message.message_id, delete_at.isoformat())
+    except Exception as e:
+        logger.warning(
+            "Could not persist deletion for msg %s — in-memory fallback active: %s",
+            message.message_id, e,
+        )
+    # Always create the asyncio task, even when the DB write failed.
+    asyncio.create_task(
+        _delete_message_at(message.chat.id, message.message_id, delete_at.timestamp())
+    )
+
+
+async def reschedule_pending_deletions() -> None:
+    """
+    Called once at startup: reload all pending deletions from the DB and
+    create asyncio tasks for them.  Messages whose deadline has already
+    passed are deleted immediately (delay=0).
+    """
+    records = get_all_pending_deletions()
+    now_ts = datetime.now(timezone.utc).timestamp()
+    count = 0
+    for rec in records:
+        try:
+            delete_at_ts = datetime.fromisoformat(rec["delete_at"]).timestamp()
+        except Exception:
+            delete_at_ts = now_ts  # malformed timestamp → delete immediately
+        asyncio.create_task(
+            _delete_message_at(rec["chat_id"], rec["message_id"], delete_at_ts)
+        )
+        count += 1
+    if count:
+        logger.info("Rescheduled %d pending message deletion(s) from DB.", count)
+    else:
+        logger.info("No pending message deletions to reschedule.")
 
 # ── Admin helpers ─────────────────────────────────────────────────────────────
 
@@ -143,6 +198,7 @@ async def _notify_admin_reliable(
                 "/start NOTIFY OK  user_id=%s  total=%d  attempt=%d  msg_id=%s",
                 user.id, total, attempt, result.message_id,
             )
+            schedule_deletion(result)
             return
         except Exception:
             wait = 2 ** attempt          # 2 s, 4 s, 8 s
@@ -359,7 +415,8 @@ async def horraire_callback(callback: CallbackQuery) -> None:
 @dp.message(Command("stats"))
 async def stats_handler(message: types.Message) -> None:
     if not is_admin(message.from_user.id):
-        await message.answer("⛔ Accès refusé.")
+        sent = await message.answer("⛔ Accès refusé.")
+        schedule_deletion(sent)
         return
     total   = user_count()
     today   = visits_today()
@@ -375,12 +432,14 @@ async def stats_handler(message: types.Message) -> None:
 @dp.message(Command("deletebroadcast"))
 async def deletebroadcast_handler(message: Message) -> None:
     if not is_admin(message.from_user.id):
-        await message.answer("⛔ Accès refusé.")
+        sent = await message.answer("⛔ Accès refusé.")
+        schedule_deletion(sent)
         return
 
     records = get_all_broadcast_messages()
     if not records:
-        await message.answer("ℹ️ Aucun message de diffusion à supprimer.")
+        sent = await message.answer("ℹ️ Aucun message de diffusion à supprimer.")
+        schedule_deletion(sent)
         return
 
     total   = len(records)
@@ -425,19 +484,22 @@ async def deletebroadcast_handler(message: Message) -> None:
 @dp.message(Command("broadcast"))
 async def broadcast_start(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
-        await message.answer("⛔ Accès refusé.")
+        sent = await message.answer("⛔ Accès refusé.")
+        schedule_deletion(sent)
         return
     await state.set_state(BroadcastState.waiting_message)
-    await message.answer(
+    sent = await message.answer(
         "✉️ Envoie le texte à diffuser à tous les utilisateurs.\n"
         "(/annuler pour abandonner)"
     )
+    schedule_deletion(sent)
 
 
 @dp.message(Command("annuler"), BroadcastState.waiting_message)
 async def broadcast_cancel(message: Message, state: FSMContext) -> None:
     await state.clear()
-    await message.answer("❌ Broadcast annulé.")
+    sent = await message.answer("❌ Broadcast annulé.")
+    schedule_deletion(sent)
 
 
 @dp.message(BroadcastState.waiting_message)
@@ -445,7 +507,8 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
     await state.clear()
     broadcast_text = message.text or message.caption or ""
     if not broadcast_text.strip():
-        await message.answer("⚠️ Message vide. Broadcast annulé.")
+        sent = await message.answer("⚠️ Message vide. Broadcast annulé.")
+        schedule_deletion(sent)
         return
 
     users  = get_all_users()
@@ -545,6 +608,7 @@ async def main() -> None:
 
     init_db()
     logger.info("Database initialised.")
+    await reschedule_pending_deletions()
     _welcome_file_id = get_config("welcome_file_id")
     if _welcome_file_id:
         logger.info("Loaded welcome_file_id from DB (length=%d)", len(_welcome_file_id))
