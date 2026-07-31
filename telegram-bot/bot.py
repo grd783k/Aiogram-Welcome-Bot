@@ -85,14 +85,14 @@ async def start_handler(message: types.Message) -> None:
            else "👋 Bienvenue sur la mini App !"
     keyboard = start_keyboard()
 
-    video_path = os.path.join(os.path.dirname(__file__), "welcome.mp4")
+    photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
 
-    if not os.path.exists(video_path):
-        logger.warning("welcome.mp4 not found — sending text only.")
+    if not os.path.exists(photo_path):
+        logger.warning("welcome.jpg not found — sending text only.")
         sent = await message.answer(text=text, reply_markup=keyboard)
     else:
-        video = FSInputFile(video_path)
-        sent = await message.answer_video(video=video, caption=text, reply_markup=keyboard)
+        photo = FSInputFile(photo_path)
+        sent = await message.answer_photo(photo=photo, caption=text, reply_markup=keyboard)
 
     schedule_deletion(sent)
 
