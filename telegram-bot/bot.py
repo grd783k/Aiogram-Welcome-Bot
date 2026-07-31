@@ -6,7 +6,8 @@ from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+# Remove all whitespace (spaces, newlines, tabs) in case the token was pasted with extra characters
+BOT_TOKEN = "".join((os.environ.get("BOT_TOKEN") or "").split())
 
 logging.basicConfig(
     level=logging.INFO,
