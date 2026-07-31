@@ -464,24 +464,6 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
 async def main() -> None:
     global _welcome_file_id
 
-    # ── Guard: only one instance should poll Telegram at a time.
-    #    In production, start.sh sets BOT_ENV=production.
-    #    The dev workflow runs without this flag → we exit immediately
-    #    so the dev and production bots never fight over Telegram updates.
-    bot_env = os.environ.get("BOT_ENV", "development")
-    if bot_env != "production":
-        logger.warning(
-            "BOT_ENV=%r (not 'production') — polling disabled to avoid "
-            "conflict with the deployed production bot. "
-            "Set BOT_ENV=production to enable polling in this environment.",
-            bot_env,
-        )
-        # Sleep forever so the workflow stays alive without polling Telegram.
-        # This prevents Replit from restarting the process in a busy loop
-        # while still blocking the production bot from having a competitor.
-        await asyncio.sleep(float("inf"))
-        return
-
     init_db()
     logger.info("Database initialised.")
     _welcome_file_id = get_config("welcome_file_id")
