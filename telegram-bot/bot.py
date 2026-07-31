@@ -4,7 +4,7 @@ import os
 
 from aiogram import Bot, Dispatcher, types
 from aiogram.filters import CommandStart
-from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup
+from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 # Remove all whitespace (spaces, newlines, tabs) in case the token was pasted with extra characters
 BOT_TOKEN = "".join((os.environ.get("BOT_TOKEN") or "").split())
@@ -26,7 +26,7 @@ async def start_handler(message: types.Message) -> None:
             [
                 InlineKeyboardButton(
                     text="🥷 Ouvrir le Shop",
-                    url="https://www.guardiola66.com/login",
+                    web_app=WebAppInfo(url="https://www.guardiola66.com/login"),
                 )
             ]
         ]
