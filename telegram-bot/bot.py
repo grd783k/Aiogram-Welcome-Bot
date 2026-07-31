@@ -31,19 +31,19 @@ def start_keyboard() -> InlineKeyboardMarkup:
         inline_keyboard=[
             [
                 InlineKeyboardButton(
-                    text="🥷 Ouvrir le menu",
+                    text="📲 Ouvrir le menu",
                     web_app=WebAppInfo(url="https://www.guardiola66.com/login"),
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="💬 Contact",
+                    text="📞 Contact",
                     url="https://wa.me/212625902052",
                 )
             ],
             [
                 InlineKeyboardButton(
-                    text="📢 horaire",
+                    text="🕘 horraire",
                     callback_data="horraire",
                 )
             ],
