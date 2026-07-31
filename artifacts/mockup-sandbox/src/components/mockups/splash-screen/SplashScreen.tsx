@@ -116,7 +116,7 @@ export function SplashScreen() {
         <div style={{
           position:      "absolute",
           inset:         0,
-          background:    "radial-gradient(ellipse 60% 50% at 50% 48%, rgba(34,197,94,0.06) 0%, transparent 100%)",
+          background:    "radial-gradient(ellipse 60% 50% at 50% 48%, rgba(59,130,246,0.06) 0%, transparent 100%)",
           pointerEvents: "none",
         }} />
 
@@ -127,7 +127,7 @@ export function SplashScreen() {
             position:     "absolute",
             inset:        -28,
             borderRadius: "50%",
-            background:   "radial-gradient(circle, rgba(34,197,94,0.20) 0%, transparent 68%)",
+            background:   "radial-gradient(circle, rgba(59,130,246,0.20) 0%, transparent 68%)",
             animation:    "glow-pulse 2.4s ease-in-out infinite",
           }} />
 
@@ -142,7 +142,7 @@ export function SplashScreen() {
             alignItems:   "center",
             justifyContent:"center",
             animation:    "logo-in 0.55s cubic-bezier(0.34,1.56,0.64,1) both",
-            boxShadow:    "0 0 56px rgba(34,197,94,0.18), 0 0 18px rgba(34,197,94,0.10)",
+            boxShadow:    "0 0 56px rgba(59,130,246,0.18), 0 0 18px rgba(59,130,246,0.10)",
             overflow:     "hidden",
           }}>
             <img
@@ -174,7 +174,7 @@ export function SplashScreen() {
               fontFamily: "'SF Mono', 'Fira Code', 'Cascadia Code', monospace",
               fontSize:   12,
               fontWeight: 600,
-              color:      "#22c55e",
+              color:      "#3b82f6",
               minWidth:   34,
               textAlign:  "right",
             }}>
@@ -193,9 +193,9 @@ export function SplashScreen() {
               height:      "100%",
               width:       `${progress}%`,
               borderRadius: 999,
-              background:  "linear-gradient(90deg, #15803d, #22c55e 50%, #86efac)",
+              background:  "linear-gradient(90deg, #1d4ed8, #3b82f6 50%, #93c5fd)",
               backgroundSize: "200% 100%",
-              boxShadow:   "0 0 12px rgba(34,197,94,0.65), 0 0 5px rgba(34,197,94,0.4)",
+              boxShadow:   "0 0 12px rgba(59,130,246,0.65), 0 0 5px rgba(59,130,246,0.4)",
               animation:   progress > 0 && progress < 100
                 ? "bar-shimmer 1.4s linear infinite"
                 : "none",
