@@ -3,7 +3,7 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
     [deployment]
     router = "application"
     deploymentTarget = "vm"
-    run = ["python3", "telegram-bot/bot.py"]
+    run = ["bash", "start.sh"]
 
     [deployment.postBuild]
     args = ["pnpm", "store", "prune"]
@@ -47,4 +47,3 @@ modules = ["nodejs-24", "python-3.11", "postgresql-16"]
 
 [userenv.shared]
 MINIAPP_URL = "https://0b280a30-161a-4a13-83ad-5e350bb266d9-00-3b1b4ioogawbn.riker.replit.dev/api/"
-    
