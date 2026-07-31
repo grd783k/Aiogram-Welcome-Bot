@@ -5,6 +5,9 @@ import os
 from aiogram import Bot, Dispatcher, F, types
 from aiogram.exceptions import TelegramBadRequest, TelegramForbiddenError
 from aiogram.filters import Command, CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import (
     CallbackQuery,
     FSInputFile,
@@ -18,10 +21,8 @@ from database import get_all_users, init_db, register_user, user_count
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
-# Remove all whitespace in case the token was pasted with extra characters
 BOT_TOKEN = "".join((os.environ.get("BOT_TOKEN") or "").split())
 
-# Optional: set ADMIN_ID secret to your Telegram user_id to protect /broadcast and /stats
 ADMIN_ID_RAW = "".join((os.environ.get("ADMIN_ID") or "").split())
 ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
 
@@ -34,7 +35,12 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 bot = Bot(token=BOT_TOKEN)
-dp = Dispatcher()
+dp = Dispatcher(storage=MemoryStorage())
+
+# ── FSM states ────────────────────────────────────────────────────────────────
+
+class BroadcastState(StatesGroup):
+    waiting_message = State()  # admin has sent /broadcast, waiting for the text
 
 # ── Auto-delete helper ────────────────────────────────────────────────────────
 
@@ -53,15 +59,12 @@ def schedule_deletion(message: Message) -> None:
     """Fire-and-forget: schedule a message for deletion after DELETE_AFTER seconds."""
     asyncio.create_task(delete_after(message))
 
-
 # ── Admin guard ───────────────────────────────────────────────────────────────
 
 def is_admin(user_id: int) -> bool:
-    """Return True if ADMIN_ID is not set (open) or if user_id matches."""
-    return ADMIN_ID is None or user_id == ADMIN_ID
+    return ADMIN_ID is not None and user_id == ADMIN_ID
 
-
-# ── Keyboards ────────────────────────────────────────────────────────────────
+# ── Keyboards ─────────────────────────────────────────────────────────────────
 
 def start_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -87,14 +90,13 @@ def start_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-
-# ── Handlers ─────────────────────────────────────────────────────────────────
+# ── Handlers ──────────────────────────────────────────────────────────────────
 
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
     user = message.from_user
 
-    # ── Register user (no duplicate if /start sent again) ──
+    # Register user (INSERT OR IGNORE — no duplicates)
     if user:
         is_new = register_user(
             user_id=user.id,
@@ -105,7 +107,6 @@ async def start_handler(message: types.Message) -> None:
         if is_new:
             logger.info("New user registered: id=%s name=%s", user.id, user.first_name)
 
-    # ── Build welcome text ──
     name = (user.first_name if user and user.first_name else None) or \
            (user.username if user and user.username else None)
     text = f"👋 Bienvenue sur la mini App , {name} !" if name \
@@ -151,51 +152,87 @@ async def horraire_callback(callback: CallbackQuery) -> None:
 async def stats_handler(message: types.Message) -> None:
     """Show total registered users (admin only)."""
     if not is_admin(message.from_user.id):
+        await message.answer("⛔ Accès refusé.")
         return
     count = user_count()
     sent = await message.answer(f"👥 Utilisateurs enregistrés : *{count}*", parse_mode="Markdown")
     schedule_deletion(sent)
 
 
+# ── Broadcast — step 1 : /broadcast command ───────────────────────────────────
+
 @dp.message(Command("broadcast"))
-async def broadcast_handler(message: types.Message) -> None:
-    """
-    Send a message to all registered users.
-    Usage: /broadcast Votre texte ici
-    Admin only.
-    """
+async def broadcast_start(message: Message, state: FSMContext) -> None:
     if not is_admin(message.from_user.id):
+        await message.answer("⛔ Accès refusé.")
         return
 
-    # Extract the text after /broadcast
-    parts = message.text.split(maxsplit=1)
-    if len(parts) < 2:
-        await message.answer("⚠️ Usage : /broadcast <message>")
+    await state.set_state(BroadcastState.waiting_message)
+    await message.answer(
+        "✉️ Envoie le texte à diffuser à tous les utilisateurs.\n"
+        "(/annuler pour abandonner)"
+    )
+
+
+# ── Broadcast — cancel ────────────────────────────────────────────────────────
+
+@dp.message(Command("annuler"), BroadcastState.waiting_message)
+async def broadcast_cancel(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("❌ Broadcast annulé.")
+
+
+# ── Broadcast — step 2 : receive the text and send to all users ───────────────
+
+@dp.message(BroadcastState.waiting_message)
+async def broadcast_send(message: Message, state: FSMContext) -> None:
+    await state.clear()
+
+    broadcast_text = message.text or message.caption or ""
+    if not broadcast_text.strip():
+        await message.answer("⚠️ Message vide. Broadcast annulé.")
         return
 
-    broadcast_text = parts[1]
     users = get_all_users()
-
+    total = len(users)
     sent_count = 0
     failed_count = 0
 
-    for user in users:
+    progress = await message.answer(f"📤 Envoi en cours… 0 / {total}")
+
+    for i, user in enumerate(users, start=1):
         try:
             await bot.send_message(chat_id=user["chat_id"], text=broadcast_text)
             sent_count += 1
-            await asyncio.sleep(0.05)  # stay within Telegram rate limits
         except (TelegramBadRequest, TelegramForbiddenError):
-            failed_count += 1  # user blocked the bot or chat not found
+            # User blocked the bot or chat no longer exists — skip silently
+            failed_count += 1
         except Exception as e:
-            logger.warning("Broadcast failed for chat_id=%s: %s", user["chat_id"], e)
+            logger.warning("Broadcast error for chat_id=%s: %s", user["chat_id"], e)
             failed_count += 1
 
+        # Update progress every 10 users
+        if i % 10 == 0 or i == total:
+            try:
+                await progress.edit_text(f"📤 Envoi en cours… {i} / {total}")
+            except Exception:
+                pass
+
+        await asyncio.sleep(0.05)  # stay within Telegram rate limits (20 msg/s)
+
     report = (
-        f"📢 Broadcast terminé\n"
-        f"✅ Envoyé : {sent_count}\n"
-        f"❌ Échec  : {failed_count}"
+        f"📢 *Broadcast terminé*\n"
+        f"✅ Envoyé avec succès : {sent_count}\n"
+        f"❌ Échecs (bloqués / inaccessibles) : {failed_count}"
     )
-    await message.answer(report)
+
+    try:
+        await progress.delete()
+    except Exception:
+        pass
+
+    sent = await message.answer(report, parse_mode="Markdown")
+    schedule_deletion(sent)  # rapport supprimé après 1 heure
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
@@ -203,7 +240,7 @@ async def broadcast_handler(message: types.Message) -> None:
 async def main() -> None:
     init_db()
     logger.info("Database initialised.")
-    logger.info("Starting bot…")
+    logger.info("Starting bot… (admin_id=%s)", ADMIN_ID)
     await dp.start_polling(bot)
 
 
