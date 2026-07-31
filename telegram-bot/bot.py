@@ -64,6 +64,9 @@ logger = logging.getLogger(__name__)
 bot = Bot(token=BOT_TOKEN)
 dp  = Dispatcher(storage=MemoryStorage())
 
+# Cached after the first upload — avoids re-uploading welcome.jpg on every /start
+_welcome_file_id: str | None = None
+
 # ── FSM states ────────────────────────────────────────────────────────────────
 
 class BroadcastState(StatesGroup):
@@ -201,36 +204,63 @@ async def scheduler_close() -> None:
 
 # ── Handlers ──────────────────────────────────────────────────────────────────
 
+async def _post_start(user: types.User, chat_id: int) -> None:
+    """Background task: DB writes + admin notification after the reply is already sent."""
+    is_new = register_user(
+        user_id=user.id,
+        chat_id=chat_id,
+        first_name=user.first_name or "",
+        username=user.username,
+    )
+    log_visit(user.id)
+    logger.info("%s user: id=%s name=%s", "New" if is_new else "Returning", user.id, user.first_name)
+    await notify_admin(user, is_new)
+
+
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
-    user = message.from_user
-    if user:
-        is_new = register_user(
-            user_id=user.id,
-            chat_id=message.chat.id,
-            first_name=user.first_name or "",
-            username=user.username,
-        )
-        log_visit(user.id)   # always recorded, even for returning users
-        logger.info("%s user: id=%s name=%s", "New" if is_new else "Returning", user.id, user.first_name)
-        asyncio.create_task(notify_admin(user, is_new))  # non-blocking — don't delay the reply
+    global _welcome_file_id
+    t0 = asyncio.get_event_loop().time()
 
+    user = message.from_user
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
     text = f"👋 Bienvenue sur la mini App , {name} !" if name \
            else "👋 Bienvenue sur la mini App !"
-
     keyboard   = start_keyboard()
     photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
 
-    if not os.path.exists(photo_path):
+    # ── Send reply immediately ────────────────────────────────────────────────
+    if _welcome_file_id:
+        # Cached file_id: Telegram serves the image from its CDN — no upload
+        sent = await message.answer_photo(
+            photo=_welcome_file_id, caption=text, reply_markup=keyboard
+        )
+    elif os.path.exists(photo_path):
+        # First call: upload the file; cache the returned file_id for all future calls
+        sent = await message.answer_photo(
+            photo=FSInputFile(photo_path), caption=text, reply_markup=keyboard
+        )
+        if sent.photo:
+            _welcome_file_id = sent.photo[-1].file_id
+            logger.info("welcome.jpg file_id cached (%s…)", _welcome_file_id[:24])
+    else:
         logger.warning("welcome.jpg not found — sending text only.")
         sent = await message.answer(text=text, reply_markup=keyboard)
-    else:
-        photo = FSInputFile(photo_path)
-        sent  = await message.answer_photo(photo=photo, caption=text, reply_markup=keyboard)
+
+    t1 = asyncio.get_event_loop().time()
+    logger.info(
+        "/start replied in %.0f ms  [cached=%s  user_id=%s]",
+        (t1 - t0) * 1000,
+        _welcome_file_id is not None,
+        user.id if user else "?",
+    )
 
     schedule_deletion(sent)
+
+    # ── DB writes + admin notification run in background ─────────────────────
+    if user:
+        asyncio.create_task(_post_start(user, message.chat.id))
 
 
 @dp.message(Command("contact"))
