@@ -121,19 +121,32 @@ async def _notify_admin_reliable(
         f"📊 Total inscrits : *{total}*"
     )
     for attempt in range(1, 4):
+        logger.info(
+            "/start NOTIFY SENDING  user_id=%s  attempt=%d/3  admin_id=%s",
+            user.id, attempt, ADMIN_ID,
+        )
         try:
-            await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
-            logger.info("/start NOTIFIED  user_id=%s  total=%d  attempt=%d", user.id, total, attempt)
-            return
-        except Exception as exc:
-            wait = 2 ** attempt          # 2 s, 4 s, 8 s
-            logger.warning(
-                "/start NOTIFY FAILED  attempt=%d/3  user_id=%s  error=%s  retry_in=%ds",
-                attempt, user.id, exc, wait if attempt < 3 else 0,
+            result = await bot.send_message(chat_id=ADMIN_ID, text=text, parse_mode="Markdown")
+            logger.info(
+                "/start NOTIFY OK  user_id=%s  total=%d  attempt=%d  msg_id=%s",
+                user.id, total, attempt, result.message_id,
             )
+            return
+        except Exception:
+            wait = 2 ** attempt          # 2 s, 4 s, 8 s
             if attempt < 3:
+                logger.warning(
+                    "/start NOTIFY FAILED  attempt=%d/3  user_id=%s  retry_in=%ds — traceback:",
+                    attempt, user.id, wait,
+                    exc_info=True,         # prints full traceback
+                )
                 await asyncio.sleep(wait)
-    logger.error("/start NOTIFY ABANDONED  user_id=%s  all 3 attempts failed", user.id)
+            else:
+                logger.error(
+                    "/start NOTIFY ABANDONED  user_id=%s  all 3 attempts failed — traceback:",
+                    user.id,
+                    exc_info=True,         # full traceback on final failure
+                )
 
 # ── Keyboards ─────────────────────────────────────────────────────────────────
 
@@ -249,10 +262,14 @@ async def start_handler(message: types.Message) -> None:
             username   = user.username,
         )
         log_visit(user.id)
-        logger.info("/start DB  %s  user_id=%s  total_users=%d",
-                    "NEW" if is_new else "RETURNING", user.id, total)
+        status = "CRÉÉ" if is_new else "EXISTANT"
+        logger.info(
+            "/start USER %s  user_id=%s  first_name=%r  username=%r  total_users=%d",
+            status, user.id, user.first_name, user.username, total,
+        )
     else:
         is_new, total = False, user_count()
+        logger.warning("/start NO USER in message — skipping DB write")
 
     # ── [3] Send reply immediately ─────────────────────────────────────────────
     t2   = loop.time()
