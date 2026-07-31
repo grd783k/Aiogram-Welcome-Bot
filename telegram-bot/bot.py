@@ -3,7 +3,7 @@ import logging
 import os
 
 from aiogram import Bot, Dispatcher, types
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import FSInputFile, InlineKeyboardButton, InlineKeyboardMarkup, WebAppInfo
 
 # Remove all whitespace (spaces, newlines, tabs) in case the token was pasted with extra characters
@@ -53,6 +53,24 @@ async def start_handler(message: types.Message) -> None:
             "👋 Bienvenue sur la mini-app !\n\n"
             "Clique sur le bouton ci-dessous pour ouvrir le shop."
         ),
+        reply_markup=keyboard,
+    )
+
+
+@dp.message(Command("contact"))
+async def contact_handler(message: types.Message) -> None:
+    keyboard = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="💬 WhatsApp",
+                    url="https://wa.me/212625902052",
+                )
+            ]
+        ]
+    )
+    await message.answer(
+        text="📱 Contact WhatsApp",
         reply_markup=keyboard,
     )
 
