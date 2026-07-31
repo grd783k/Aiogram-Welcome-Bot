@@ -21,10 +21,17 @@ from database import get_all_users, init_db, register_user, user_count
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
+import re
+
 BOT_TOKEN = "".join((os.environ.get("BOT_TOKEN") or "").split())
 
-ADMIN_ID_RAW = "".join((os.environ.get("ADMIN_ID") or "").split())
-ADMIN_ID = int(ADMIN_ID_RAW) if ADMIN_ID_RAW.isdigit() else None
+# Extract only digits from ADMIN_ID (handles spaces, @, newlines, invisible chars)
+_admin_raw = os.environ.get("ADMIN_ID") or ""
+_admin_digits = re.sub(r"\D", "", _admin_raw)
+try:
+    ADMIN_ID: int | None = int(_admin_digits) if _admin_digits else None
+except ValueError:
+    ADMIN_ID = None
 
 DELETE_AFTER = 3600  # seconds (1 hour)
 
