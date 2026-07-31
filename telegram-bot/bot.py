@@ -2,7 +2,7 @@ import asyncio
 import logging
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, types
@@ -220,41 +220,51 @@ async def _post_start(user: types.User, chat_id: int) -> None:
 @dp.message(CommandStart())
 async def start_handler(message: types.Message) -> None:
     global _welcome_file_id
-    t0 = asyncio.get_event_loop().time()
+    loop = asyncio.get_event_loop()
+    t0   = loop.time()
 
     user = message.from_user
+
+    # ── How long did this update wait before the bot received it? ─────────────
+    now_utc     = datetime.now(timezone.utc)
+    update_age  = (now_utc - message.date.replace(tzinfo=timezone.utc)).total_seconds()
+    logger.info(
+        "/start RECEIVED  update_age=%.1fs  cached=%s  user_id=%s",
+        update_age,
+        _welcome_file_id is not None,
+        user.id if user else "?",
+    )
+
+    # ── Build reply text (pure Python, ~0 ms) ────────────────────────────────
+    t1   = loop.time()
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
     text = f"👋 Bienvenue sur la mini App , {name} !" if name \
            else "👋 Bienvenue sur la mini App !"
     keyboard   = start_keyboard()
     photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
+    logger.info("/start PREPARED  prep=%.0f ms", (loop.time() - t1) * 1000)
 
-    # ── Send reply immediately ────────────────────────────────────────────────
+    # ── Telegram API call (network round-trip to api.telegram.org) ───────────
+    t2 = loop.time()
     if _welcome_file_id:
-        # Cached file_id: Telegram serves the image from its CDN — no upload
         sent = await message.answer_photo(
             photo=_welcome_file_id, caption=text, reply_markup=keyboard
         )
+        logger.info("/start SENT (cached file_id)  api=%.0f ms", (loop.time() - t2) * 1000)
     elif os.path.exists(photo_path):
-        # First call: upload the file; cache the returned file_id for all future calls
         sent = await message.answer_photo(
             photo=FSInputFile(photo_path), caption=text, reply_markup=keyboard
         )
         if sent.photo:
             _welcome_file_id = sent.photo[-1].file_id
-            logger.info("welcome.jpg file_id cached (%s…)", _welcome_file_id[:24])
+        logger.info("/start SENT (uploaded file)  api=%.0f ms", (loop.time() - t2) * 1000)
     else:
-        logger.warning("welcome.jpg not found — sending text only.")
         sent = await message.answer(text=text, reply_markup=keyboard)
+        logger.info("/start SENT (text only)  api=%.0f ms", (loop.time() - t2) * 1000)
 
-    t1 = asyncio.get_event_loop().time()
-    logger.info(
-        "/start replied in %.0f ms  [cached=%s  user_id=%s]",
-        (t1 - t0) * 1000,
-        _welcome_file_id is not None,
-        user.id if user else "?",
-    )
+    logger.info("/start TOTAL=%.0f ms  [update_age=%.1fs  cached=%s]",
+                (loop.time() - t0) * 1000, update_age, _welcome_file_id is not None)
 
     schedule_deletion(sent)
 
