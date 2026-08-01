@@ -37,6 +37,14 @@ pending_deletions
     message_id  BIGINT NOT NULL       — message to delete
     delete_at   TEXT   NOT NULL       — ISO-8601 UTC timestamp of scheduled deletion
     UNIQUE (chat_id, message_id)      — one row per message
+
+loyalty_accounts
+    user_id     BIGINT PRIMARY KEY    — Telegram user ID (unique per user)
+    first_name  TEXT   NOT NULL       — Telegram first name at account creation
+    last_name   TEXT                  — Telegram last name (nullable)
+    username    TEXT                  — Telegram @username (nullable)
+    created_at  TEXT   NOT NULL       — ISO-8601 UTC timestamp of account creation
+    points      INTEGER NOT NULL      — loyalty points balance (default 0)
 """
 
 import os
@@ -113,6 +121,17 @@ def init_db() -> None:
                     message_id BIGINT NOT NULL,
                     delete_at  TEXT   NOT NULL,
                     UNIQUE (chat_id, message_id)
+                )
+            """)
+            # Loyalty programme — one account per Telegram user, created on first visit.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS loyalty_accounts (
+                    user_id    BIGINT  PRIMARY KEY,
+                    first_name TEXT    NOT NULL DEFAULT '',
+                    last_name  TEXT,
+                    username   TEXT,
+                    created_at TEXT    NOT NULL,
+                    points     INTEGER NOT NULL DEFAULT 0
                 )
             """)
         conn.commit()
@@ -363,3 +382,47 @@ def set_config(key: str, value: str) -> None:
                 (key, value),
             )
         conn.commit()
+
+
+# ── Loyalty accounts ──────────────────────────────────────────────────────────
+
+def get_or_create_loyalty_account(
+    user_id:    int,
+    first_name: str,
+    last_name:  str | None,
+    username:   str | None,
+) -> tuple[dict, bool]:
+    """
+    Retrieve the loyalty account for *user_id*, creating it if it doesn't exist yet.
+
+    Returns (account, is_new) where account is a dict with keys:
+        user_id, first_name, last_name, username, created_at, points
+
+    The account is created with 0 points and the current UTC timestamp.
+    If the account already exists the existing row is returned unchanged —
+    no fields are updated on subsequent calls.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO loyalty_accounts
+                    (user_id, first_name, last_name, username, created_at, points)
+                VALUES (%s, %s, %s, %s, %s, 0)
+                ON CONFLICT (user_id) DO NOTHING
+                """,
+                (user_id, first_name or "", last_name, username, now),
+            )
+            is_new = cur.rowcount > 0
+            cur.execute(
+                """
+                SELECT user_id, first_name, last_name, username, created_at, points
+                FROM loyalty_accounts
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            account = dict(cur.fetchone())
+        conn.commit()
+        return account, is_new

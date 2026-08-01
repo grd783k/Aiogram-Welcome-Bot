@@ -46,6 +46,7 @@ from database import (
     set_config,
     user_count,
     visits_today,
+    get_or_create_loyalty_account,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -271,22 +272,38 @@ def social_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
-def loyalty_keyboard() -> InlineKeyboardMarkup:
+def loyalty_keyboard(account: dict | None = None) -> InlineKeyboardMarkup:
     """
     Sous-menu Programme de fidélité.
 
-    Structure prévue pour les évolutions futures :
-      - Ligne 0 : en-tête non-cliquable (label)
-      - Lignes 1-N : compteur de points, historique, récompenses (à ajouter ici)
-      - Dernière ligne : ⬅️ Retour → back_main
+    Structure :
+      - Ligne 0  : en-tête non-cliquable
+      - Lignes 1-3 : infos du compte (prénom, points, date) — si account fourni
+      - Lignes N+ : futures fonctionnalités (historique, récompenses)
+      - Dernière  : ⬅️ Retour → back_main
     """
-    return InlineKeyboardMarkup(inline_keyboard=[
-        # En-tête — label visuel, clic silencieux (noop)
+    rows = [
         [InlineKeyboardButton(text="⭐ Programme de fidélité", callback_data="noop")],
-        # ── Futures fonctionnalités (points, historique, récompenses) ──────────
-        # Retour menu principal
-        [InlineKeyboardButton(text="⬅️ Retour", callback_data="back_main")],
-    ])
+    ]
+
+    if account:
+        name = account.get("first_name") or "—"
+        points = account.get("points", 0)
+        created = "—"
+        try:
+            from datetime import datetime as _dt
+            created = _dt.fromisoformat(account["created_at"]).strftime("%d/%m/%Y")
+        except Exception:
+            pass
+        rows += [
+            [InlineKeyboardButton(text=f"👤 {name}", callback_data="noop")],
+            [InlineKeyboardButton(text=f"💰 Points : {points}", callback_data="noop")],
+            [InlineKeyboardButton(text=f"📅 Membre depuis : {created}", callback_data="noop")],
+        ]
+
+    # ── Futures fonctionnalités (historique, récompenses) ─────────────────────
+    rows.append([InlineKeyboardButton(text="⬅️ Retour", callback_data="back_main")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def home_button_keyboard() -> InlineKeyboardMarkup:
@@ -441,9 +458,16 @@ async def start_handler(message: types.Message) -> None:
 
 @dp.callback_query(F.data == "loyalty")
 async def loyalty_callback(callback: CallbackQuery) -> None:
-    """Ouvre la page Programme de fidélité en remplaçant le clavier inline."""
+    """Ouvre la page Programme de fidélité — crée le compte fidélité si besoin."""
     await callback.answer()
-    await callback.message.edit_reply_markup(reply_markup=loyalty_keyboard())
+    user = callback.from_user
+    account, _ = get_or_create_loyalty_account(
+        user_id    = user.id,
+        first_name = user.first_name or "",
+        last_name  = user.last_name,
+        username   = user.username,
+    )
+    await callback.message.edit_reply_markup(reply_markup=loyalty_keyboard(account))
 
 
 @dp.callback_query(F.data == "noop")
