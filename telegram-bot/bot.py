@@ -19,8 +19,10 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
+    KeyboardButton,
     MenuButtonWebApp,
     Message,
+    ReplyKeyboardMarkup,
     WebAppInfo,
 )
 
@@ -240,6 +242,48 @@ def start_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
+def reply_keyboard() -> ReplyKeyboardMarkup:
+    """Persistent reply keyboard — always visible at the bottom of the chat."""
+    return ReplyKeyboardMarkup(
+        keyboard=[[KeyboardButton(text="🔔 Retour à l'accueil")]],
+        resize_keyboard=True,
+        persistent=True,
+    )
+
+
+async def _send_welcome(message: types.Message, name: str | None) -> None:
+    """
+    Send the welcome photo + inline keyboard and (re-)install the persistent
+    reply keyboard.  Shared by /start and the "🔔 Retour à l'accueil" handler.
+    """
+    global _welcome_file_id
+    text       = f"👋 Bienvenue sur la mini App , {name} !" if name \
+                 else "👋 Bienvenue sur la mini App !"
+    keyboard   = start_keyboard()
+    photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
+
+    if _welcome_file_id:
+        sent = await message.answer_photo(
+            photo=_welcome_file_id, caption=text, reply_markup=keyboard
+        )
+    elif os.path.exists(photo_path):
+        sent = await message.answer_photo(
+            photo=FSInputFile(photo_path), caption=text, reply_markup=keyboard
+        )
+        if sent.photo:
+            _welcome_file_id = sent.photo[-1].file_id
+            set_config("welcome_file_id", _welcome_file_id)
+    else:
+        sent = await message.answer(text=text, reply_markup=keyboard)
+
+    schedule_deletion(sent)
+
+    # Install / refresh the persistent reply keyboard with a minimal message.
+    # The message is deleted after 3 s; the keyboard stays visible permanently.
+    nav = await message.answer("🏠", reply_markup=reply_keyboard())
+    schedule_deletion(nav, delay=3)
+
+
 # ── Daily scheduler ───────────────────────────────────────────────────────────
 
 def _next_occurrence(hour: int, tz: ZoneInfo) -> datetime:
@@ -343,42 +387,26 @@ async def start_handler(message: types.Message) -> None:
         is_new, total = False, user_count()
         logger.warning("/start NO USER in message — skipping DB write")
 
-    # ── [3] Send reply immediately ─────────────────────────────────────────────
-    t2   = loop.time()
+    # ── [3] Send welcome message + install reply keyboard ─────────────────────
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
-    text       = f"👋 Bienvenue sur la mini App , {name} !" if name \
-                 else "👋 Bienvenue sur la mini App !"
-    keyboard   = start_keyboard()
-    photo_path = os.path.join(os.path.dirname(__file__), "welcome.jpg")
-
-    if _welcome_file_id:
-        sent = await message.answer_photo(
-            photo=_welcome_file_id, caption=text, reply_markup=keyboard
-        )
-        logger.info("/start SENT (cached file_id)  api=%.0f ms", (loop.time() - t2) * 1000)
-    elif os.path.exists(photo_path):
-        sent = await message.answer_photo(
-            photo=FSInputFile(photo_path), caption=text, reply_markup=keyboard
-        )
-        if sent.photo:
-            _welcome_file_id = sent.photo[-1].file_id
-            set_config("welcome_file_id", _welcome_file_id)
-            logger.info("/start SENT (uploaded + file_id cached)  api=%.0f ms",
-                        (loop.time() - t2) * 1000)
-        else:
-            logger.info("/start SENT (uploaded file)  api=%.0f ms", (loop.time() - t2) * 1000)
-    else:
-        sent = await message.answer(text=text, reply_markup=keyboard)
-        logger.info("/start SENT (text only)  api=%.0f ms", (loop.time() - t2) * 1000)
-
+    await _send_welcome(message, name)
     logger.info("/start TOTAL=%.0f ms  [update_age=%.1fs  total=%d  new=%s]",
                 (loop.time() - t0) * 1000, update_age, total, is_new)
-    schedule_deletion(sent)
 
     # ── [4] Admin notification — background task, 3 retry attempts ────────────
     if user:
         asyncio.create_task(_notify_admin_reliable(user, is_new, total))
+
+
+@dp.message(F.text == "🔔 Retour à l'accueil")
+async def home_button_handler(message: types.Message) -> None:
+    user = message.from_user
+    name = (user.first_name if user and user.first_name else None) or \
+           (user.username   if user and user.username   else None)
+    if user:
+        log_visit(user.id)
+    await _send_welcome(message, name)
 
 
 @dp.message(Command("channel"))
