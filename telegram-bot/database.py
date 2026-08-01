@@ -426,3 +426,78 @@ def get_or_create_loyalty_account(
             account = dict(cur.fetchone())
         conn.commit()
         return account, is_new
+
+
+def get_loyalty_account(user_id: int) -> dict | None:
+    """Return the loyalty account for *user_id*, or None if it doesn't exist."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT user_id, first_name, last_name, username, created_at, points
+                FROM loyalty_accounts
+                WHERE user_id = %s
+                """,
+                (user_id,),
+            )
+            row = cur.fetchone()
+        return dict(row) if row else None
+
+
+def search_loyalty_users(query: str) -> list[dict]:
+    """
+    Search loyalty accounts by:
+    • Exact user_id (if the query is purely numeric)
+    • username — case-insensitive substring (leading @ is stripped)
+    • first_name — case-insensitive substring
+    Returns up to 10 results ordered by first_name.
+    """
+    stripped = query.lstrip("@").strip()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            # Exact user_id match takes priority
+            if stripped.isdigit():
+                cur.execute(
+                    """
+                    SELECT user_id, first_name, last_name, username, created_at, points
+                    FROM loyalty_accounts WHERE user_id = %s
+                    """,
+                    (int(stripped),),
+                )
+                rows = cur.fetchall()
+                if rows:
+                    return [dict(r) for r in rows]
+            # Substring match on username / first_name
+            pattern = f"%{stripped}%"
+            cur.execute(
+                """
+                SELECT user_id, first_name, last_name, username, created_at, points
+                FROM loyalty_accounts
+                WHERE username ILIKE %s OR first_name ILIKE %s
+                ORDER BY first_name
+                LIMIT 10
+                """,
+                (pattern, pattern),
+            )
+            return [dict(r) for r in cur.fetchall()]
+
+
+def update_loyalty_points(user_id: int, delta: int) -> dict | None:
+    """
+    Add *delta* to loyalty_accounts.points, clamped to a minimum of 0.
+    Returns the updated account dict, or None if the account does not exist.
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE loyalty_accounts
+                SET points = GREATEST(0, points + %s)
+                WHERE user_id = %s
+                RETURNING user_id, first_name, last_name, username, created_at, points
+                """,
+                (delta, user_id),
+            )
+            row = cur.fetchone()
+        conn.commit()
+        return dict(row) if row else None

@@ -47,6 +47,9 @@ from database import (
     user_count,
     visits_today,
     get_or_create_loyalty_account,
+    get_loyalty_account,
+    search_loyalty_users,
+    update_loyalty_points,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -86,6 +89,10 @@ _welcome_file_id: str | None = None
 
 class BroadcastState(StatesGroup):
     waiting_message = State()
+
+class AdminLoyalty(StatesGroup):
+    searching    = State()   # waiting for admin to send a search query
+    custom_input = State()   # waiting for admin to enter a custom point amount
 
 # ── Auto-delete helpers (persistent — survive bot restarts) ───────────────────
 
@@ -304,6 +311,54 @@ def loyalty_keyboard(account: dict | None = None) -> InlineKeyboardMarkup:
     # ── Futures fonctionnalités (historique, récompenses) ─────────────────────
     rows.append([InlineKeyboardButton(text="⬅️ Retour", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def _admin_profile_text(account: dict) -> str:
+    """Format a loyalty account as HTML for the admin panel."""
+    fname = html_mod.escape(account.get("first_name") or "—")
+    lname = html_mod.escape(account.get("last_name") or "")
+    full  = f"{fname} {lname}".strip()
+    uname = html_mod.escape(f"@{account['username']}" if account.get("username") else "—")
+    uid   = account["user_id"]
+    pts   = account.get("points", 0)
+    created = "—"
+    try:
+        from datetime import datetime as _dt
+        created = _dt.fromisoformat(account["created_at"]).strftime("%d/%m/%Y à %H:%M")
+    except Exception:
+        pass
+    return (
+        "🔐 <b>Panneau fidélité — profil</b>\n\n"
+        f"👤 Nom : <b>{full}</b>\n"
+        f"📛 Username : {uname}\n"
+        f"🆔 ID : <code>{uid}</code>\n"
+        f"💰 Points : <b>{pts}</b>\n"
+        f"📅 Membre depuis : {created}"
+    )
+
+
+def _admin_user_keyboard(user_id: int) -> InlineKeyboardMarkup:
+    """Inline keyboard for the admin loyalty profile view."""
+    uid = user_id
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [
+            InlineKeyboardButton(text="+1", callback_data=f"ladmin_add:{uid}:1"),
+            InlineKeyboardButton(text="+2", callback_data=f"ladmin_add:{uid}:2"),
+            InlineKeyboardButton(text="+3", callback_data=f"ladmin_add:{uid}:3"),
+            InlineKeyboardButton(text="+4", callback_data=f"ladmin_add:{uid}:4"),
+            InlineKeyboardButton(text="+5", callback_data=f"ladmin_add:{uid}:5"),
+        ],
+        [InlineKeyboardButton(text="➕ Saisir un nombre", callback_data=f"ladmin_custom_add:{uid}")],
+        [
+            InlineKeyboardButton(text="-1", callback_data=f"ladmin_sub:{uid}:1"),
+            InlineKeyboardButton(text="-2", callback_data=f"ladmin_sub:{uid}:2"),
+            InlineKeyboardButton(text="-3", callback_data=f"ladmin_sub:{uid}:3"),
+            InlineKeyboardButton(text="-4", callback_data=f"ladmin_sub:{uid}:4"),
+            InlineKeyboardButton(text="-5", callback_data=f"ladmin_sub:{uid}:5"),
+        ],
+        [InlineKeyboardButton(text="➖ Retirer un nombre", callback_data=f"ladmin_custom_sub:{uid}")],
+        [InlineKeyboardButton(text="🔍 Nouvelle recherche", callback_data="ladmin_search")],
+    ])
 
 
 def home_button_keyboard() -> InlineKeyboardMarkup:
@@ -668,6 +723,206 @@ async def broadcast_send(message: Message, state: FSMContext) -> None:
     )
     sent = await message.answer(report, parse_mode="Markdown")
     schedule_deletion(sent)
+
+# ── Admin loyalty panel ───────────────────────────────────────────────────────
+
+@dp.message(Command("ladmin"))
+async def ladmin_command(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        sent = await message.answer("⛔ Accès refusé.")
+        schedule_deletion(sent)
+        return
+    await state.set_state(AdminLoyalty.searching)
+    sent = await message.answer(
+        "🔐 <b>Panneau administrateur — Fidélité</b>\n\n"
+        "🔍 Envoie l'<b>ID Telegram</b>, le <b>@username</b> ou le <b>prénom</b> "
+        "de l'utilisateur.",
+        parse_mode="HTML",
+    )
+    schedule_deletion(sent)
+
+
+@dp.message(Command("annuler"), AdminLoyalty.custom_input)
+async def ladmin_cancel_custom(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    sent = await message.answer("❌ Saisie annulée.")
+    schedule_deletion(sent)
+
+
+@dp.message(AdminLoyalty.searching)
+async def ladmin_search_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    query = (message.text or "").strip()
+    if not query:
+        return
+    await state.clear()
+    results = search_loyalty_users(query)
+    if not results:
+        sent = await message.answer(
+            f"🔍 Aucun résultat pour « <b>{html_mod.escape(query)}</b> ».\n\n"
+            "Essaie avec un autre terme ou /ladmin pour relancer.",
+            parse_mode="HTML",
+        )
+        schedule_deletion(sent)
+        return
+    rows = []
+    for acc in results:
+        fname     = acc.get("first_name") or "—"
+        uname_str = f" (@{acc['username']})" if acc.get("username") else ""
+        label     = f"👤 {fname}{uname_str}"[:64]   # Telegram button text limit
+        rows.append([InlineKeyboardButton(
+            text=label,
+            callback_data=f"ladmin_view:{acc['user_id']}",
+        )])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=rows)
+    sent = await message.answer(
+        f"🔍 {len(results)} résultat(s) pour « <b>{html_mod.escape(query)}</b> » :",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+    schedule_deletion(sent)
+
+
+@dp.callback_query(F.data.startswith("ladmin_view:"))
+async def ladmin_view_callback(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    await callback.answer()
+    user_id = int(callback.data.split(":")[1])
+    account = get_loyalty_account(user_id)
+    if account is None:
+        await callback.answer("⚠️ Compte introuvable.", show_alert=True)
+        return
+    sent = await callback.message.answer(
+        _admin_profile_text(account),
+        parse_mode="HTML",
+        reply_markup=_admin_user_keyboard(user_id),
+    )
+    schedule_deletion(sent)
+
+
+@dp.callback_query(F.data.startswith("ladmin_add:"))
+async def ladmin_add_callback(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    _, uid_str, amount_str = callback.data.split(":")
+    user_id = int(uid_str)
+    delta   = int(amount_str)
+    account = update_loyalty_points(user_id, delta)
+    if account is None:
+        await callback.answer("⚠️ Compte introuvable.", show_alert=True)
+        return
+    await callback.answer(f"✅ +{delta} point(s) ajouté(s).")
+    await callback.message.edit_text(
+        _admin_profile_text(account),
+        parse_mode="HTML",
+        reply_markup=_admin_user_keyboard(user_id),
+    )
+
+
+@dp.callback_query(F.data.startswith("ladmin_sub:"))
+async def ladmin_sub_callback(callback: CallbackQuery) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    _, uid_str, amount_str = callback.data.split(":")
+    user_id = int(uid_str)
+    delta   = int(amount_str)
+    account = update_loyalty_points(user_id, -delta)
+    if account is None:
+        await callback.answer("⚠️ Compte introuvable.", show_alert=True)
+        return
+    await callback.answer(f"✅ -{delta} point(s) retiré(s).")
+    await callback.message.edit_text(
+        _admin_profile_text(account),
+        parse_mode="HTML",
+        reply_markup=_admin_user_keyboard(user_id),
+    )
+
+
+@dp.callback_query(F.data.startswith("ladmin_custom_add:"))
+async def ladmin_custom_add_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    user_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await state.set_state(AdminLoyalty.custom_input)
+    await state.update_data(user_id=user_id, mode="add")
+    sent = await callback.message.answer(
+        "➕ Combien de points à <b>ajouter</b> ?\n"
+        "Envoie un nombre entier positif.  (/annuler pour abandonner)",
+        parse_mode="HTML",
+    )
+    schedule_deletion(sent)
+
+
+@dp.callback_query(F.data.startswith("ladmin_custom_sub:"))
+async def ladmin_custom_sub_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    user_id = int(callback.data.split(":")[1])
+    await callback.answer()
+    await state.set_state(AdminLoyalty.custom_input)
+    await state.update_data(user_id=user_id, mode="sub")
+    sent = await callback.message.answer(
+        "➖ Combien de points à <b>retirer</b> ?\n"
+        "Envoie un nombre entier positif.  (/annuler pour abandonner)",
+        parse_mode="HTML",
+    )
+    schedule_deletion(sent)
+
+
+@dp.message(AdminLoyalty.custom_input)
+async def ladmin_custom_input_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    data    = await state.get_data()
+    user_id = data.get("user_id")
+    mode    = data.get("mode", "add")
+    text    = (message.text or "").strip()
+    if not text.isdigit() or int(text) <= 0:
+        sent = await message.answer("⚠️ Valeur invalide. Envoie un nombre entier positif.")
+        schedule_deletion(sent)
+        return
+    await state.clear()
+    amount  = int(text)
+    delta   = amount if mode == "add" else -amount
+    account = update_loyalty_points(user_id, delta)
+    if account is None:
+        sent = await message.answer("⚠️ Compte introuvable.")
+        schedule_deletion(sent)
+        return
+    action = f"+{amount}" if mode == "add" else f"-{amount}"
+    sent = await message.answer(
+        f"✅ {action} point(s). Nouveau solde : <b>{account['points']}</b>\n\n"
+        + _admin_profile_text(account),
+        parse_mode="HTML",
+        reply_markup=_admin_user_keyboard(user_id),
+    )
+    schedule_deletion(sent)
+
+
+@dp.callback_query(F.data == "ladmin_search")
+async def ladmin_search_callback(callback: CallbackQuery, state: FSMContext) -> None:
+    if not is_admin(callback.from_user.id):
+        await callback.answer("⛔ Accès refusé.", show_alert=True)
+        return
+    await callback.answer()
+    await state.set_state(AdminLoyalty.searching)
+    sent = await callback.message.answer(
+        "🔍 Envoie l'<b>ID Telegram</b>, le <b>@username</b> ou le <b>prénom</b> "
+        "de l'utilisateur.",
+        parse_mode="HTML",
+    )
+    schedule_deletion(sent)
+
 
 # ── Heartbeat helpers (dev/production conflict prevention) ────────────────────
 
