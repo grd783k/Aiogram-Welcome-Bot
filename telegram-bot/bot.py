@@ -235,6 +235,10 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 web_app=WebAppInfo(url=os.environ.get("MINIAPP_URL", "https://www.guardiola66.com/login")),
             )],
             [InlineKeyboardButton(
+                text="⭐ Fidélité",
+                callback_data="loyalty",
+            )],
+            [InlineKeyboardButton(
                 text="📞 Contact",
                 url="https://wa.me/212625902052",
             )],
@@ -249,10 +253,6 @@ def start_keyboard() -> InlineKeyboardMarkup:
             [InlineKeyboardButton(
                 text="📱 Réseaux sociaux",
                 callback_data="social",
-            )],
-            [InlineKeyboardButton(
-                text="⭐ Fidélité",
-                callback_data="loyalty",
             )],
         ]
     )
