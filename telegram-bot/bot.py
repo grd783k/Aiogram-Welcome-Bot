@@ -250,15 +250,15 @@ def social_keyboard() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=[
         [InlineKeyboardButton(
             text="📢 Instagram",
-            url="https://www.instagram.com/",          # ← remplacer par le vrai lien
+            url="https://www.instagram.com/guardiola_farm66?igsh=MWNwa2N0ZXh1Z2t6cQ%3D%3D&utm_source=qr",
         )],
         [InlineKeyboardButton(
             text="💬 luffa",
-            url="https://t.me/",                       # ← remplacer par le vrai lien
+            url="https://callup.luffa.im/c/HmgxAPKyp9G",
         )],
         [InlineKeyboardButton(
             text="📸 tato talk",
-            url="https://t.me/",                       # ← remplacer par le vrai lien
+            url="https://tatokdym.org/coffee66guardiola",
         )],
         [InlineKeyboardButton(
             text="⬅️ Retour",
