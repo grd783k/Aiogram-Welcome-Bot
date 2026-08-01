@@ -242,6 +242,10 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 text="📱 Réseaux sociaux",
                 callback_data="social",
             )],
+            [InlineKeyboardButton(
+                text="⭐ Fidélité",
+                callback_data="loyalty",
+            )],
         ]
     )
 
@@ -264,6 +268,24 @@ def social_keyboard() -> InlineKeyboardMarkup:
             text="⬅️ Retour",
             callback_data="back_main",
         )],
+    ])
+
+
+def loyalty_keyboard() -> InlineKeyboardMarkup:
+    """
+    Sous-menu Programme de fidélité.
+
+    Structure prévue pour les évolutions futures :
+      - Ligne 0 : en-tête non-cliquable (label)
+      - Lignes 1-N : compteur de points, historique, récompenses (à ajouter ici)
+      - Dernière ligne : ⬅️ Retour → back_main
+    """
+    return InlineKeyboardMarkup(inline_keyboard=[
+        # En-tête — label visuel, clic silencieux (noop)
+        [InlineKeyboardButton(text="⭐ Programme de fidélité", callback_data="noop")],
+        # ── Futures fonctionnalités (points, historique, récompenses) ──────────
+        # Retour menu principal
+        [InlineKeyboardButton(text="⬅️ Retour", callback_data="back_main")],
     ])
 
 
@@ -415,6 +437,19 @@ async def start_handler(message: types.Message) -> None:
     # ── [4] Admin notification — background task, 3 retry attempts ────────────
     if user:
         asyncio.create_task(_notify_admin_reliable(user, is_new, total))
+
+
+@dp.callback_query(F.data == "loyalty")
+async def loyalty_callback(callback: CallbackQuery) -> None:
+    """Ouvre la page Programme de fidélité en remplaçant le clavier inline."""
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=loyalty_keyboard())
+
+
+@dp.callback_query(F.data == "noop")
+async def noop_callback(callback: CallbackQuery) -> None:
+    """En-tête non-cliquable — répond silencieusement sans effet visible."""
+    await callback.answer()
 
 
 @dp.callback_query(F.data == "social")
