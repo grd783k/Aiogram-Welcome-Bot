@@ -50,6 +50,8 @@ from database import (
     get_loyalty_account,
     search_loyalty_users,
     update_loyalty_points,
+    add_loyalty_history,
+    get_loyalty_history,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -91,8 +93,9 @@ class BroadcastState(StatesGroup):
     waiting_message = State()
 
 class AdminLoyalty(StatesGroup):
-    searching    = State()   # waiting for admin to send a search query
-    custom_input = State()   # waiting for admin to enter a custom point amount
+    searching     = State()   # waiting for admin to send a search query
+    custom_input  = State()   # waiting for admin to enter a custom point amount
+    custom_reason = State()   # waiting for admin to enter the reason for the movement
 
 # ── Auto-delete helpers (persistent — survive bot restarts) ───────────────────
 
@@ -341,7 +344,9 @@ def loyalty_keyboard(account: dict | None = None) -> InlineKeyboardMarkup:
             [InlineKeyboardButton(text=progress,                        callback_data="noop")],
         ]
 
-    # ── Futures fonctionnalités (historique, récompenses) ─────────────────────
+    # ── Historique des points ─────────────────────────────────────────────────
+    if account:
+        rows.append([InlineKeyboardButton(text="📜 Historique des points", callback_data="loyalty_history")])
     rows.append([InlineKeyboardButton(text="⬅️ Retour", callback_data="back_main")])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
@@ -556,6 +561,31 @@ async def loyalty_callback(callback: CallbackQuery) -> None:
         username   = user.username,
     )
     await callback.message.edit_reply_markup(reply_markup=loyalty_keyboard(account))
+
+
+@dp.callback_query(F.data == "loyalty_history")
+async def loyalty_history_callback(callback: CallbackQuery) -> None:
+    """Affiche les 15 derniers mouvements de points de l'utilisateur."""
+    await callback.answer()
+    user_id  = callback.from_user.id
+    history  = get_loyalty_history(user_id, limit=15)
+    if not history:
+        text = "📜 <b>Historique des points</b>\n\nAucun mouvement enregistré pour l'instant."
+    else:
+        lines = ["📜 <b>Historique des points</b>\n"]
+        for entry in history:
+            delta  = entry["delta"]
+            sign   = f"➕ +{delta}" if delta >= 0 else f"➖ {delta}"
+            reason = html_mod.escape(entry.get("reason") or "—")
+            try:
+                from datetime import datetime as _dt
+                dt_str = _dt.fromisoformat(entry["created_at"]).strftime("%d/%m/%Y %H:%M")
+            except Exception:
+                dt_str = entry.get("created_at", "—")
+            lines.append(f"📅 <b>{dt_str}</b>  {sign}\n📝 {reason}")
+        text = "\n\n".join(lines)
+    sent = await callback.message.answer(text, parse_mode="HTML")
+    schedule_deletion(sent)
 
 
 @dp.callback_query(F.data == "noop")
@@ -849,6 +879,7 @@ async def ladmin_add_callback(callback: CallbackQuery) -> None:
     if account is None:
         await callback.answer("⚠️ Compte introuvable.", show_alert=True)
         return
+    add_loyalty_history(user_id, delta, "Ajout de points (admin)")
     await callback.answer(f"✅ +{delta} point(s) ajouté(s).")
     await callback.message.edit_text(
         _admin_profile_text(account),
@@ -869,6 +900,7 @@ async def ladmin_sub_callback(callback: CallbackQuery) -> None:
     if account is None:
         await callback.answer("⚠️ Compte introuvable.", show_alert=True)
         return
+    add_loyalty_history(user_id, -delta, "Retrait de points (admin)")
     await callback.answer(f"✅ -{delta} point(s) retiré(s).")
     await callback.message.edit_text(
         _admin_profile_text(account),
@@ -924,14 +956,36 @@ async def ladmin_custom_input_handler(message: Message, state: FSMContext) -> No
         sent = await message.answer("⚠️ Valeur invalide. Envoie un nombre entier positif.")
         schedule_deletion(sent)
         return
+    amount = int(text)
+    await state.update_data(amount=amount)
+    await state.set_state(AdminLoyalty.custom_reason)
+    sent = await message.answer(
+        "📝 Quel est le <b>motif</b> de ce mouvement ?\n"
+        "Ex. : <i>Commande validée</i>, <i>Bonus</i>, <i>Correction</i>…\n"
+        "(/annuler pour abandonner)",
+        parse_mode="HTML",
+    )
+    schedule_deletion(sent)
+
+
+@dp.message(AdminLoyalty.custom_reason)
+async def ladmin_custom_reason_handler(message: Message, state: FSMContext) -> None:
+    if not is_admin(message.from_user.id):
+        await state.clear()
+        return
+    data    = await state.get_data()
+    user_id = data.get("user_id")
+    mode    = data.get("mode", "add")
+    amount  = data.get("amount", 0)
+    reason  = (message.text or "").strip() or ("Ajout (admin)" if mode == "add" else "Retrait (admin)")
     await state.clear()
-    amount  = int(text)
     delta   = amount if mode == "add" else -amount
     account = update_loyalty_points(user_id, delta)
     if account is None:
         sent = await message.answer("⚠️ Compte introuvable.")
         schedule_deletion(sent)
         return
+    add_loyalty_history(user_id, delta, reason)
     action = f"+{amount}" if mode == "add" else f"-{amount}"
     sent = await message.answer(
         f"✅ {action} point(s). Nouveau solde : <b>{account['points']}</b>\n\n"

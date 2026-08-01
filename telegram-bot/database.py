@@ -134,6 +134,16 @@ def init_db() -> None:
                     points     INTEGER NOT NULL DEFAULT 0
                 )
             """)
+            # Loyalty history — one row per point movement, never deleted.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS loyalty_history (
+                    id         SERIAL  PRIMARY KEY,
+                    user_id    BIGINT  NOT NULL,
+                    delta      INTEGER NOT NULL,
+                    reason     TEXT    NOT NULL DEFAULT '',
+                    created_at TEXT    NOT NULL
+                )
+            """)
         conn.commit()
 
 
@@ -501,3 +511,45 @@ def update_loyalty_points(user_id: int, delta: int) -> dict | None:
             row = cur.fetchone()
         conn.commit()
         return dict(row) if row else None
+
+
+def add_loyalty_history(user_id: int, delta: int, reason: str) -> None:
+    """
+    Insert one row into loyalty_history for a point movement.
+    Never raises — logs errors silently so point updates always succeed.
+    """
+    from datetime import datetime, timezone as _tz
+    created_at = datetime.now(_tz.utc).isoformat()
+    try:
+        with _connect() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    INSERT INTO loyalty_history (user_id, delta, reason, created_at)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (user_id, delta, reason.strip(), created_at),
+                )
+            conn.commit()
+    except Exception:
+        import logging as _log
+        _log.getLogger(__name__).exception("add_loyalty_history failed user=%s", user_id)
+
+
+def get_loyalty_history(user_id: int, limit: int = 15) -> list[dict]:
+    """
+    Return the last *limit* point movements for *user_id*, newest first.
+    """
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                SELECT id, user_id, delta, reason, created_at
+                FROM loyalty_history
+                WHERE user_id = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (user_id, limit),
+            )
+            return [dict(r) for r in cur.fetchall()]
