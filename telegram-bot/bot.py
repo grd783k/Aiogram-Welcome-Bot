@@ -279,22 +279,51 @@ def social_keyboard() -> InlineKeyboardMarkup:
     ])
 
 
+def _loyalty_level(points: int) -> tuple[str, int, int | None]:
+    """
+    Retourne (label_niveau, points_min_niveau, points_min_niveau_suivant_ou_None).
+    🥉 Bronze  :   0 –  99
+    🥈 Argent  : 100 – 299
+    🥇 Or      : 300 – 599
+    💎 Diamant : 600 +
+    """
+    if points >= 600:
+        return ("💎 Diamant", 600, None)
+    elif points >= 300:
+        return ("🥇 Or", 300, 600)
+    elif points >= 100:
+        return ("🥈 Argent", 100, 300)
+    else:
+        return ("🥉 Bronze", 0, 100)
+
+
+def _loyalty_progress_bar(points: int, level_min: int, next_min: int | None) -> str:
+    """Barre de progression 10 blocs vers le niveau suivant."""
+    if next_min is None:
+        return "██████████ 🏆 Niveau maximum !"
+    total   = next_min - level_min
+    current = points - level_min
+    pct     = min(int(current / total * 100), 100)
+    filled  = min(pct // 10, 10)
+    bar     = "█" * filled + "░" * (10 - filled)
+    return f"{bar} {pct} %  →  {next_min} pts"
+
+
 def loyalty_keyboard(account: dict | None = None) -> InlineKeyboardMarkup:
     """
     Sous-menu Programme de fidélité.
 
     Structure :
-      - Ligne 0  : en-tête non-cliquable
-      - Lignes 1-3 : infos du compte (prénom, points, date) — si account fourni
-      - Lignes N+ : futures fonctionnalités (historique, récompenses)
-      - Dernière  : ⬅️ Retour → back_main
+      - Ligne 0    : en-tête non-cliquable
+      - Lignes 1-5 : infos du compte (prénom, points, niveau, date, barre) — si account fourni
+      - Dernière   : ⬅️ Retour → back_main
     """
     rows = [
         [InlineKeyboardButton(text="⭐ Programme de fidélité", callback_data="noop")],
     ]
 
     if account:
-        name = account.get("first_name") or "—"
+        name   = account.get("first_name") or "—"
         points = account.get("points", 0)
         created = "—"
         try:
@@ -302,10 +331,14 @@ def loyalty_keyboard(account: dict | None = None) -> InlineKeyboardMarkup:
             created = _dt.fromisoformat(account["created_at"]).strftime("%d/%m/%Y")
         except Exception:
             pass
+        level_label, level_min, next_min = _loyalty_level(points)
+        progress = _loyalty_progress_bar(points, level_min, next_min)
         rows += [
-            [InlineKeyboardButton(text=f"👤 {name}", callback_data="noop")],
-            [InlineKeyboardButton(text=f"💰 Points : {points}", callback_data="noop")],
+            [InlineKeyboardButton(text=f"👤 {name}",                   callback_data="noop")],
+            [InlineKeyboardButton(text=f"⭐ Points : {points}",         callback_data="noop")],
+            [InlineKeyboardButton(text=f"🏅 Niveau : {level_label}",   callback_data="noop")],
             [InlineKeyboardButton(text=f"📅 Membre depuis : {created}", callback_data="noop")],
+            [InlineKeyboardButton(text=progress,                        callback_data="noop")],
         ]
 
     # ── Futures fonctionnalités (historique, récompenses) ─────────────────────
