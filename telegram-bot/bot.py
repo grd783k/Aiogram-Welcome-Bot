@@ -19,10 +19,8 @@ from aiogram.types import (
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    KeyboardButton,
     MenuButtonWebApp,
     Message,
-    ReplyKeyboardMarkup,
     WebAppInfo,
 )
 
@@ -81,6 +79,7 @@ dp  = Dispatcher(storage=MemoryStorage())
 
 # Cached after the first upload — avoids re-uploading welcome.jpg on every /start
 _welcome_file_id: str | None = None
+
 
 # ── FSM states ────────────────────────────────────────────────────────────────
 
@@ -242,19 +241,17 @@ def start_keyboard() -> InlineKeyboardMarkup:
         ]
     )
 
-def reply_keyboard() -> ReplyKeyboardMarkup:
-    """Persistent reply keyboard — always visible at the bottom of the chat."""
-    return ReplyKeyboardMarkup(
-        keyboard=[[KeyboardButton(text="🔔 Retour à l'accueil")]],
-        resize_keyboard=True,
-        persistent=True,
-    )
+def home_button_keyboard() -> InlineKeyboardMarkup:
+    """Single-button keyboard with the home callback — added to secondary messages."""
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🔔 Retour à l'accueil", callback_data="home")
+    ]])
 
 
 async def _send_welcome(message: types.Message, name: str | None) -> None:
     """
-    Send the welcome photo + inline keyboard and (re-)install the persistent
-    reply keyboard.  Shared by /start and the "🔔 Retour à l'accueil" handler.
+    Send the welcome photo + inline keyboard.
+    Shared by /start and the home callback handler.
     """
     global _welcome_file_id
     text       = f"👋 Bienvenue sur la mini App , {name} !" if name \
@@ -277,11 +274,6 @@ async def _send_welcome(message: types.Message, name: str | None) -> None:
         sent = await message.answer(text=text, reply_markup=keyboard)
 
     schedule_deletion(sent)
-
-    # Install / refresh the persistent reply keyboard with a minimal message.
-    # The message is deleted after 3 s; the keyboard stays visible permanently.
-    nav = await message.answer("🏠", reply_markup=reply_keyboard())
-    schedule_deletion(nav, delay=3)
 
 
 # ── Daily scheduler ───────────────────────────────────────────────────────────
@@ -399,24 +391,26 @@ async def start_handler(message: types.Message) -> None:
         asyncio.create_task(_notify_admin_reliable(user, is_new, total))
 
 
-@dp.message(F.text == "🔔 Retour à l'accueil")
-async def home_button_handler(message: types.Message) -> None:
-    user = message.from_user
+@dp.callback_query(F.data == "home")
+async def home_callback(callback: CallbackQuery) -> None:
+    await callback.answer()
+    user = callback.from_user
     name = (user.first_name if user and user.first_name else None) or \
            (user.username   if user and user.username   else None)
     if user:
         log_visit(user.id)
-    await _send_welcome(message, name)
+    await _send_welcome(callback.message, name)
 
 
 @dp.message(Command("channel"))
 async def channel_handler(message: types.Message) -> None:
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
             text="📢 Rejoindre le canal",
             url="https://t.me/+lhdKsCF5TW00NTg0",
-        )
-    ]])
+        )],
+        [InlineKeyboardButton(text="🔔 Retour à l'accueil", callback_data="home")],
+    ])
     sent = await message.reply(
         "Clique sur le bouton ci-dessous :",
         reply_markup=keyboard,
@@ -426,9 +420,10 @@ async def channel_handler(message: types.Message) -> None:
 
 @dp.message(Command("contact"))
 async def contact_handler(message: types.Message) -> None:
-    keyboard = InlineKeyboardMarkup(inline_keyboard=[[
-        InlineKeyboardButton(text="💬 WhatsApp", url="https://wa.me/212625902052")
-    ]])
+    keyboard = InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(text="💬 WhatsApp", url="https://wa.me/212625902052")],
+        [InlineKeyboardButton(text="🔔 Retour à l'accueil", callback_data="home")],
+    ])
     sent = await message.answer(text="📱 Contact WhatsApp", reply_markup=keyboard)
     schedule_deletion(sent)
 
@@ -436,7 +431,7 @@ async def contact_handler(message: types.Message) -> None:
 @dp.callback_query(F.data == "horraire")
 async def horraire_callback(callback: CallbackQuery) -> None:
     await callback.answer()
-    sent = await callback.message.answer(text="Midi - minuit")
+    sent = await callback.message.answer(text="Midi - minuit", reply_markup=home_button_keyboard())
     schedule_deletion(sent)
 
 
@@ -453,7 +448,7 @@ async def stats_handler(message: types.Message) -> None:
         f"👥 Utilisateurs enregistrés : *{total}*\n"
         f"📅 Visites aujourd'hui (00:00 → 23:59) : *{today}*"
     )
-    sent = await message.answer(text, parse_mode="Markdown")
+    sent = await message.answer(text, parse_mode="Markdown", reply_markup=home_button_keyboard())
     schedule_deletion(sent)
 
 
