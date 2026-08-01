@@ -284,6 +284,8 @@
 
     // Notifier Telegram que la Mini App est prête
     try { if (tg) tg.ready(); } catch (_) {}
+    // Ouvrir automatiquement en hauteur maximale
+    try { if (tg) tg.expand(); } catch (_) {}
 
     setTimeout(startProgress, LOGO_DELAY_MS);
   })();
