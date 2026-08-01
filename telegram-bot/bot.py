@@ -238,8 +238,34 @@ def start_keyboard() -> InlineKeyboardMarkup:
                 text="📢 Canal",
                 url="https://t.me/+lhdKsCF5TW00NTg0",
             )],
+            [InlineKeyboardButton(
+                text="📱 Réseaux sociaux",
+                callback_data="social",
+            )],
         ]
     )
+
+def social_keyboard() -> InlineKeyboardMarkup:
+    """Sous-menu Réseaux sociaux — remplace le clavier principal inline."""
+    return InlineKeyboardMarkup(inline_keyboard=[
+        [InlineKeyboardButton(
+            text="📢 Instagram",
+            url="https://www.instagram.com/",          # ← remplacer par le vrai lien
+        )],
+        [InlineKeyboardButton(
+            text="💬 luffa",
+            url="https://t.me/",                       # ← remplacer par le vrai lien
+        )],
+        [InlineKeyboardButton(
+            text="📸 tato talk",
+            url="https://t.me/",                       # ← remplacer par le vrai lien
+        )],
+        [InlineKeyboardButton(
+            text="⬅️ Retour",
+            callback_data="back_main",
+        )],
+    ])
+
 
 def home_button_keyboard() -> InlineKeyboardMarkup:
     """Single-button keyboard with the home callback — added to secondary messages."""
@@ -389,6 +415,20 @@ async def start_handler(message: types.Message) -> None:
     # ── [4] Admin notification — background task, 3 retry attempts ────────────
     if user:
         asyncio.create_task(_notify_admin_reliable(user, is_new, total))
+
+
+@dp.callback_query(F.data == "social")
+async def social_callback(callback: CallbackQuery) -> None:
+    """Ouvre le sous-menu Réseaux sociaux en remplaçant le clavier inline."""
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=social_keyboard())
+
+
+@dp.callback_query(F.data == "back_main")
+async def back_main_callback(callback: CallbackQuery) -> None:
+    """Retour au menu principal depuis le sous-menu Réseaux sociaux."""
+    await callback.answer()
+    await callback.message.edit_reply_markup(reply_markup=start_keyboard())
 
 
 @dp.callback_query(F.data == "home")
