@@ -1,0 +1,3 @@
+- [Production deployment entrypoint](prod-deployment-entrypoint.md) — artifact.toml MUST point to `bash start.sh`, jamais directement à `node`
+- [BOT_ENV convention](bot-env-convention.md) — défaut `"production"`, le workflow dev force `BOT_ENV=development` explicitement
+- [Migration utilisateurs](migration-users.md) — 97 utilisateurs réels, `migrate_users.py` idempotent (ON CONFLICT DO NOTHING), lancé par start.sh
