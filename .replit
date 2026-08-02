@@ -30,7 +30,7 @@ outputType = "console"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "BOT_ENV=development python3 telegram-bot/bot.py"
+args = "echo '[Telegram Bot] Désactivé — bot tourne sur VPS Hetzner uniquement.'"
 
     [agent]
     stack = "PNPM_WORKSPACE"
