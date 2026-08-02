@@ -1,0 +1,31 @@
+[Unit]
+Description=Guardiola Farm 66 — Bot Telegram
+Documentation=https://github.com/ton-repo
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=guardiola
+Group=guardiola
+WorkingDirectory=/opt/guardiola
+
+# Charge les variables depuis le fichier .env
+EnvironmentFile=/opt/guardiola/.env
+
+# Démarre le bot
+ExecStart=/usr/bin/python3 /opt/guardiola/bot/bot.py
+
+# Redémarre automatiquement en cas de crash
+Restart=always
+RestartSec=5
+StartLimitInterval=60
+StartLimitBurst=5
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=guardiola-bot
+
+[Install]
+WantedBy=multi-user.target

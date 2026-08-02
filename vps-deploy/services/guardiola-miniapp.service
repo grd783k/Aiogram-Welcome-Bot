@@ -1,0 +1,27 @@
+[Unit]
+Description=Guardiola Farm 66 — Mini App Telegram (Express)
+After=network.target
+
+[Service]
+Type=simple
+User=guardiola
+Group=guardiola
+WorkingDirectory=/opt/guardiola/miniapp
+
+# Variables
+Environment=NODE_ENV=production
+Environment=PORT=8080
+EnvironmentFile=/opt/guardiola/.env
+
+# Démarre le serveur Node
+ExecStart=/usr/bin/node /opt/guardiola/miniapp/server.js
+
+Restart=always
+RestartSec=3
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=guardiola-miniapp
+
+[Install]
+WantedBy=multi-user.target
