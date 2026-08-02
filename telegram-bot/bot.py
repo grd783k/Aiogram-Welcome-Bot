@@ -3,6 +3,13 @@ import html as html_mod
 import logging
 import os
 import re
+
+# Charge les variables depuis .env si présent (utile en dehors de Replit)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
 import signal
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo

@@ -50,6 +50,13 @@ loyalty_accounts
 import os
 from datetime import datetime, timezone
 
+# Charge les variables depuis .env si présent (utile en dehors de Replit)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass
+
 import psycopg2
 import psycopg2.extras
 
