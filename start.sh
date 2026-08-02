@@ -5,6 +5,9 @@ set -e
 echo "[start.sh] Building API server…"
 pnpm --filter @workspace/api-server run build
 
+echo "[start.sh] Migration des utilisateurs…"
+python3 telegram-bot/migrate_users.py || echo "[start.sh] ⚠️  migrate_users.py a échoué, démarrage quand même."
+
 echo "[start.sh] Starting Telegram bot with supervision…"
 # Supervision loop: restarts the bot if it exits for any reason.
 # 'set +e' inside the subshell prevents 'set -e' (from the outer script) from
