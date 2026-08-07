@@ -17,6 +17,11 @@
       var _tw = window.Telegram.WebApp;
       if (_tw.requestFullscreen && parseFloat(_tw.version) >= 8) _tw.requestFullscreen();
     } catch(_) {}
+    // Bloque la fermeture par glissement vers le bas (Bot API 7.7+) — seul le bouton Fermer quitte la Mini App
+    try {
+      var _tw2 = window.Telegram.WebApp;
+      if (_tw2.disableVerticalSwipes) _tw2.disableVerticalSwipes();
+    } catch(_) {}
   </script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
