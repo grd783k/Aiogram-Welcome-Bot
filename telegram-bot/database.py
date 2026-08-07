@@ -130,6 +130,17 @@ def init_db() -> None:
                     UNIQUE (chat_id, message_id)
                 )
             """)
+            # Journal des messages de chat (entrants + sortants) pour le nettoyage
+            # automatique 24 h.  Ne contient AUCUN contenu — uniquement les IDs.
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS chat_log (
+                    id         SERIAL PRIMARY KEY,
+                    chat_id    BIGINT NOT NULL,
+                    message_id BIGINT NOT NULL,
+                    logged_at  TEXT   NOT NULL,
+                    UNIQUE (chat_id, message_id)
+                )
+            """)
             # Loyalty programme — one account per Telegram user, created on first visit.
             cur.execute("""
                 CREATE TABLE IF NOT EXISTS loyalty_accounts (
@@ -231,6 +242,44 @@ def visits_today() -> int:
                 (today,),
             )
             return cur.fetchone()["cnt"]
+
+
+# ── Chat log (nettoyage automatique 24 h) ─────────────────────────────────────
+
+def log_chat_message(chat_id: int, message_id: int) -> None:
+    """Journalise un message (entrant ou sortant) pour le nettoyage 24 h."""
+    now = datetime.now(timezone.utc).isoformat()
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO chat_log (chat_id, message_id, logged_at) "
+                "VALUES (%s, %s, %s) ON CONFLICT (chat_id, message_id) DO NOTHING",
+                (chat_id, message_id, now),
+            )
+        conn.commit()
+
+
+def get_chat_messages_older_than(cutoff_iso: str, limit: int = 500) -> list[dict]:
+    """Messages journalisés avant *cutoff_iso* (ISO 8601 UTC), plus anciens d'abord."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT chat_id, message_id FROM chat_log "
+                "WHERE logged_at < %s ORDER BY logged_at LIMIT %s",
+                (cutoff_iso, limit),
+            )
+            return cur.fetchall()
+
+
+def remove_chat_log(chat_id: int, message_id: int) -> None:
+    """Retire une entrée du journal après suppression (ou tentative)."""
+    with _connect() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "DELETE FROM chat_log WHERE chat_id = %s AND message_id = %s",
+                (chat_id, message_id),
+            )
+        conn.commit()
 
 
 # ── Broadcast messages ────────────────────────────────────────────────────────

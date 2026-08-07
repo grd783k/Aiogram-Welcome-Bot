@@ -59,6 +59,9 @@ from database import (
     update_loyalty_points,
     add_loyalty_history,
     get_loyalty_history,
+    log_chat_message,
+    get_chat_messages_older_than,
+    remove_chat_log,
 )
 
 # ── Config ────────────────────────────────────────────────────────────────────
@@ -72,6 +75,8 @@ except ValueError:
     ADMIN_ID = None
 
 DELETE_AFTER = 3600       # seconds — auto-delete regular bot replies after 1 h
+CHAT_RETENTION_HOURS   = 24    # historique de conversation conservé 24 h max
+CHAT_CLEANUP_INTERVAL  = 3600  # la boucle de nettoyage tourne toutes les heures
 TZ = ZoneInfo("Europe/Paris")   # scheduler timezone
 OPEN_HOUR   = 12          # 12:00 → send daily "shop open" message
 CLOSE_HOUR  = 0           # 00:00 → delete daily message
@@ -92,6 +97,81 @@ dp  = Dispatcher(storage=MemoryStorage())
 
 # Cached after the first upload — avoids re-uploading welcome.jpg on every /start
 _welcome_file_id: str | None = None
+
+# ── Nettoyage automatique des conversations (24 h) ────────────────────────────
+# Chaque message (entrant + sortant) est journalisé dans chat_log (IDs seulement,
+# aucun contenu).  Une boucle de fond supprime dans Telegram tout message vieux
+# de plus de CHAT_RETENTION_HOURS.  Les données en base ne sont jamais touchées.
+
+@dp.message.outer_middleware()
+async def _log_incoming_message(handler, event, data):
+    """Journalise chaque message reçu (utilisateurs ET admin)."""
+    try:
+        if isinstance(event, Message):
+            await asyncio.to_thread(log_chat_message, event.chat.id, event.message_id)
+    except Exception:
+        logger.debug("chat_log: échec journalisation entrant", exc_info=True)
+    return await handler(event, data)
+
+
+async def _log_outgoing_message(make_request, bot_obj, method):
+    """Session middleware : journalise chaque message envoyé par le bot."""
+    result = await make_request(bot_obj, method)
+    try:
+        if isinstance(result, Message):
+            await asyncio.to_thread(log_chat_message, result.chat.id, result.message_id)
+    except Exception:
+        logger.debug("chat_log: échec journalisation sortant", exc_info=True)
+    return result
+
+bot.session.middleware(_log_outgoing_message)
+
+
+async def _chat_cleanup_loop() -> None:
+    """Toutes les heures : supprime dans Telegram les messages > 24 h."""
+    while True:
+        try:
+            cutoff = (
+                datetime.now(timezone.utc) - timedelta(hours=CHAT_RETENTION_HOURS)
+            ).isoformat()
+            deleted = 0
+            while True:
+                records = await asyncio.to_thread(get_chat_messages_older_than, cutoff)
+                if not records:
+                    break
+                retained = 0  # échecs transitoires conservés pour la prochaine passe
+                for rec in records:
+                    remove_row = True
+                    try:
+                        await bot.delete_message(
+                            chat_id=rec["chat_id"], message_id=rec["message_id"]
+                        )
+                        deleted += 1
+                    except (TelegramBadRequest, TelegramForbiddenError):
+                        pass  # terminal : déjà supprimé, trop ancien (>48 h) ou bot bloqué
+                    except Exception as e:
+                        # Erreur transitoire (réseau, rate limit…) : on GARDE la ligne
+                        # en base pour réessayer à la prochaine passe horaire.
+                        remove_row = False
+                        retained += 1
+                        logger.debug(
+                            "cleanup: échec transitoire chat=%s msg=%s: %s",
+                            rec["chat_id"], rec["message_id"], e,
+                        )
+                    if remove_row:
+                        await asyncio.to_thread(
+                            remove_chat_log, rec["chat_id"], rec["message_id"]
+                        )
+                    await asyncio.sleep(0.05)  # respecte le rate limit Telegram
+                if retained:
+                    # Des lignes conservées seraient re-sélectionnées immédiatement :
+                    # on arrête cette passe et on réessaie dans 1 h.
+                    break
+            if deleted:
+                logger.info("Nettoyage 24 h : %d message(s) supprimé(s).", deleted)
+        except Exception:
+            logger.warning("Boucle de nettoyage 24 h en erreur — nouvelle tentative dans 1 h", exc_info=True)
+        await asyncio.sleep(CHAT_CLEANUP_INTERVAL)
 
 
 # ── FSM states ────────────────────────────────────────────────────────────────
@@ -1123,6 +1203,8 @@ async def main() -> None:
     # Start daily schedulers as background tasks
     asyncio.create_task(scheduler_open())
     asyncio.create_task(scheduler_close())
+    # Nettoyage automatique des conversations toutes les heures (rétention 24 h)
+    asyncio.create_task(_chat_cleanup_loop())
 
     # ── Custom polling loop — intercepts TelegramConflictError before aiogram's
     #    internal _listen_updates() retry loop swallows it.
