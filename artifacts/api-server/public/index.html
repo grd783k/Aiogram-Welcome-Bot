@@ -12,6 +12,11 @@
   <script>
     try { window.Telegram.WebApp.ready(); } catch(_) {}
     try { window.Telegram.WebApp.expand(); } catch(_) {}
+    // Plein écran natif (Bot API 8.0+) — contenu derrière la barre Telegram, bouton Fermer superposé
+    try {
+      var _tw = window.Telegram.WebApp;
+      if (_tw.requestFullscreen && parseFloat(_tw.version) >= 8) _tw.requestFullscreen();
+    } catch(_) {}
   </script>
   <style>
     *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
